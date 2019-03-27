@@ -1,6 +1,7 @@
 
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <poll.h>
 #include <unistd.h>
 #include <errno.h>
@@ -61,6 +62,14 @@ namespace net {
     bool socket_close(int fd, struct error_info *err);
 } // end namespace net 
 
+inline
+int64_t net::now() 
+{
+    struct timeval tv;
+    gettimeofday(&tv, nullptr);
+    return tv.tv_sec * 1000000LL + tv.tv_usec;
+}
+
 inline 
 void net::free_error_info(net::error_info * err)
 {
@@ -68,6 +77,52 @@ void net::free_error_info(net::error_info * err)
         free((void *)err->str);
         err->str = nullptr;
     }
+}
+
+inline 
+int net::socket_channel_recvn(int fd, char *data, int len, int timeout, net::error_info * err)
+{
+    struct pollfd pfd;
+    pfd.fd = fd;
+    pfd.events = POLLOUT;
+    int64_t now = net::now();
+    int64_t exp = now + (int64_t)timeout * 1000;
+    int pos = 0;
+
+    while ( timeout != 0 ) {
+        int r = poll(&pfd, 1, timeout);
+        if ( r > 0 ) {
+            if ( pfd.revents & POLLIN) {
+                ssize_t n = ::recv(fd, data + pos, len - pos, 0);
+                if ( n >= 0) {
+                    pos += n;
+                } else {
+                    err->str = strdup("failed to receive data");
+                    return -1;
+                }
+                if ( pos == len ) return len;
+            } else {
+                err->str = strdup("readable event wait failed");
+                return -1;
+            }
+        } else if ( r == 0 ) {
+            break;  // timeout
+        } else {
+            if ( errno != EINTR ) {
+                char errbuf[256];
+                snprintf(errbuf, 256, "wait failed, %s", strerror(errno));
+                err->str = strdup(errbuf);
+                return -1;  // failed
+            }
+        }
+        now = net::now();
+        if ( exp - now > 0 ) {
+            timeout = (int)((exp - now) / 1000);
+        } else {
+            break;  // timeout
+        }
+    }
+    return 0;  // timeout
 }
 
 inline 
