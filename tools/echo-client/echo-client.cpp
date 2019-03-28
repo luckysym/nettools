@@ -334,12 +334,12 @@ int net::socket_channel_sendn(int fd, const char *data, int len, int timeout, ne
     while ( timeout != 0 ) {
         int r = poll(&pfd, 1, timeout);
         if ( r > 0 ) {
-            if ( pfd.revents & POLLIN) {
+            if ( pfd.revents & POLLOUT) {
                 ssize_t n = ::send(fd, data + pos, len - pos, 0);
                 if ( n >= 0) {
                     pos += n;
                 } else {
-                    if ( err ) net::push_error_info(err, 128, "failed to send data");
+                    if ( err ) net::push_error_info(err, 128, "failed to send data, err %d, %s", errno, strerror(errno));
                     return -1;
                 }
                 if ( pos == len ) return len;
@@ -417,7 +417,7 @@ socklen_t net::sockaddr_from_location(sockaddr *paddr, socklen_t len, const loca
         return 0;
     }
     memcpy(paddr, res->ai_addr, res->ai_addrlen);     // 地址整体复制输出
-    ((sockaddr_in*)paddr)->sin_port = loc->port;   // 设置端口，in和in6端口字段位置相同
+    ((sockaddr_in*)paddr)->sin_port = htons(loc->port);   // 设置端口，in和in6端口字段位置相同
     return res->ai_addrlen;
 } // end net::sockaddr_from_location
 
@@ -481,7 +481,7 @@ int main(int argc, char **argv)
         net::free_error_info(&err);
         return -1;
     }
-
+    
     // send message
     int len = strlen(message);
     int bytes = net::socket_channel_sendn(fd, message, len, 5000, &err);
