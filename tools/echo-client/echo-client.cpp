@@ -282,7 +282,7 @@ int net::socket_channel_recvn(int fd, char *data, int len, int timeout, net::err
 {
     struct pollfd pfd;
     pfd.fd = fd;
-    pfd.events = POLLOUT;
+    pfd.events = POLLIN;
     int64_t now = net::now();
     int64_t exp = now + (int64_t)timeout * 1000;
     int pos = 0;
@@ -460,8 +460,8 @@ int main(int argc, char **argv)
         return 0;
     }
 
-    const char * remote = argv[1];
-    const char * message = argv[2];
+    char * remote = argv[1];
+    char * message = argv[2];
 
     // remote url to net::location
     net::location loc;
@@ -481,7 +481,8 @@ int main(int argc, char **argv)
         net::free_error_info(&err);
         return -1;
     }
-    
+    sleep(1);
+
     // send message
     int len = strlen(message);
     int bytes = net::socket_channel_sendn(fd, message, len, 5000, &err);
