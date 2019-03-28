@@ -8,6 +8,7 @@
 #include <unistd.h>
 #include <netdb.h>
 #include <errno.h>
+#include <stdarg.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -24,6 +25,7 @@ namespace net {
     
     typedef struct error_info {
         char * str;
+        struct error_info * next;
     } error_t;
 
     typedef struct socket_attrib {
@@ -55,7 +57,10 @@ namespace net {
     void location_free(struct localtion * loc);
 
     /// free error info members
-    void free_error_info(struct error_info * err);
+    void free_error_info(error_t * err);
+
+    /// push error info to the error object
+    void push_error_info(error_t * err, int size, const char * format, ...);
 
     /// 根据协议名称设置socket属性参数
     /// \param attr out, 输出的socket参数。
@@ -121,7 +126,6 @@ net::location * net::location_from_url(struct net::location * loc, const char * 
         if ( !p0 ) return nullptr;
         int proto_len = p0 - proto;
         
-
         // 解析host
         const char * host = p0 + 3;
         int host_len;
@@ -161,10 +165,35 @@ net::location * net::location_from_url(struct net::location * loc, const char * 
 inline 
 void net::free_error_info(net::error_info * err)
 {
+    error_t * p = err->next;
+    while ( p ) {
+        error_t * p1 = p->next;
+        if ( p->str ) {
+            free(p->str);
+            p->str = nullptr;
+        }
+        p->next = nullptr;
+        free(p);
+        p = p1;
+    }
+
     if ( err->str ) {
         free((void *)err->str);
         err->str = nullptr;
     }
+    err->next = nullptr;
+}
+
+inline 
+void net::push_error_info(net::error_info * err, int size, const char *format, ...) {
+    err->next = (error_t*)malloc(sizeof(error_t));
+    err->next->str = err->str;
+    err->str = (char*)malloc(size);
+
+    va_list ap;
+    va_start(ap, format);
+    vsnprintf(err->str, size, format, ap);
+    va_end(ap);
 }
 
 inline 
@@ -175,8 +204,7 @@ int net::socket_open_channel(const net::location * loc, int options, net::error_
     sockattr_t * p = sockattr_from_protocol(&attr, loc->proto);
     if ( !p ) {
         if ( err ) {
-            err->str = (char *)malloc(128);
-            snprintf(err->str, 128, "bad socket protocol name: %s", loc->proto);
+            net::push_error_info(err, 128, "bad socket protocol name: %s", loc->proto);
         }
         return -1;
     }
@@ -188,8 +216,7 @@ int net::socket_open_channel(const net::location * loc, int options, net::error_
     socklen_t addrlen = sockaddr_from_location((sockaddr*)addrbuf, 128, loc, &e2);
     if ( addrlen == 0 ) {
         if ( err ) {
-            err->str = (char *)malloc(128);
-            snprintf(err->str, 128, "bad socket location addr: %s/%s/%d/%s", 
+            net::push_error_info(err, 128, "bad socket location addr: %s/%s/%d/%s", 
                 loc->proto, loc->host?loc->host:"<none>", loc->port, loc->path?loc->path:"<none>");
         }
         free_error_info(&e2);
@@ -202,8 +229,7 @@ int net::socket_open_channel(const net::location * loc, int options, net::error_
     int fd = ::socket(attr.af, attr.type | nonblock | SOCK_CLOEXEC, attr.proto);
     if ( fd == -1 ) {
         if ( err ) {
-            err->str = (char *)malloc(128);
-            snprintf(err->str, 128, "failed to create socket, %d, %s", errno, strerror(errno));
+            net::push_error_info(err, 128, "failed to create socket, %d, %s", errno, strerror(errno));
         }
         return -1;
     }
@@ -214,8 +240,9 @@ int net::socket_open_channel(const net::location * loc, int options, net::error_
         int r = setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &opt, sizeof(opt));
         if ( r == -1 ) {
             if ( err ) {
-                err->str = (char *)malloc(128);
-                snprintf(err->str, 128, "setsockopt tcp_nodelay error, fd=%d, err=%d, %s", fd, errno, strerror(errno));
+                net::push_error_info(
+                    err, 128, "setsockopt tcp_nodelay error, fd=%d, err=%d, %s", 
+                    fd, errno, strerror(errno));
             }
             close(fd);
             return -1;
@@ -228,8 +255,8 @@ int net::socket_open_channel(const net::location * loc, int options, net::error_
         int r = setsockopt(fd, SOL_SOCKET, SO_LINGER, &lg, sizeof(lg));
         if ( r == -1 ) {
             if ( err ) {
-                err->str = (char *)malloc(128);
-                snprintf(err->str, 128, "setsockopt tcp_nodelay error, fd=%d, err=%d, %s", fd, errno, strerror(errno));
+                net::push_error_info(err, 128, "setsockopt tcp_nodelay error, fd=%d, err=%d, %s", 
+                    fd, errno, strerror(errno));
             }
             close(fd);
             return -1;
@@ -240,8 +267,8 @@ int net::socket_open_channel(const net::location * loc, int options, net::error_
     int r = connect(fd, paddr, addrlen);
     if ( r == -1 ) {
         if ( err ) {
-            err->str = (char *)malloc(128);
-            snprintf(err->str, 128, "connect error, fd=%d, err=%d, %s", fd, errno, strerror(errno));
+            net::push_error_info(err, 128, "connect error, fd=%d, err=%d, %s", 
+                fd, errno, strerror(errno));
         }
         close(fd);
         return -1;
@@ -268,23 +295,19 @@ int net::socket_channel_recvn(int fd, char *data, int len, int timeout, net::err
                 if ( n >= 0) {
                     pos += n;
                 } else {
-                    if ( err ) err->str = strdup("failed to receive data");
+                    if ( err ) net::push_error_info(err, 128, "failed to receive data"); 
                     return -1;
                 }
                 if ( pos == len ) return len;
             } else {
-                if ( err ) err->str = strdup("readable event wait failed");
+                if ( err ) net::push_error_info(err, 128, "readable event wait failed");
                 return -1;
             }
         } else if ( r == 0 ) {
             break;  // timeout
         } else {
             if ( errno != EINTR ) {
-                if ( err ) {
-                    char errbuf[256];
-                    snprintf(errbuf, 256, "wait failed, %s", strerror(errno));
-                    err->str = strdup(errbuf);
-                }
+                if ( err ) net::push_error_info(err, 128, "wait failed, %s", strerror(errno));
                 return -1;  // failed
             }
         }
@@ -316,12 +339,12 @@ int net::socket_channel_sendn(int fd, const char *data, int len, int timeout, ne
                 if ( n >= 0) {
                     pos += n;
                 } else {
-                    err->str = strdup("failed to send data");
+                    if ( err ) net::push_error_info(err, 128, "failed to send data");
                     return -1;
                 }
                 if ( pos == len ) return len;
             } else {
-                err->str = strdup("writable event wait failed");
+                if ( err ) net::push_error_info(err, 128, "writable event wait failed");
                 return -1;
             }
         } else if ( r == 0 ) {
@@ -329,9 +352,7 @@ int net::socket_channel_sendn(int fd, const char *data, int len, int timeout, ne
         } else {
             if ( errno != EINTR ) {
                 if ( err) {
-                    char errbuf[256];
-                    snprintf(errbuf, 256, "wait failed, %s", strerror(errno));
-                    err->str = strdup(errbuf);
+                    net::push_error_info(err, 128, "wait failed, %s", strerror(errno));
                 }
                 return -1;  // failed
             }
@@ -352,7 +373,7 @@ bool net::socket_close( int fd, struct net::error_info * err)
     int r = ::close(fd);
     if ( r == 0 ) return true;
     
-    if ( err ) err->str = ::strdup(strerror(errno));
+    if ( err ) net::push_error_info(err, 128, "close fd failed, fd:%d, %s", fd, strerror(errno)); 
     return false;
 }
 
@@ -364,8 +385,7 @@ socklen_t net::sockaddr_from_location(sockaddr *paddr, socklen_t len, const loca
     sockattr_t * p = sockattr_from_protocol(&attr, loc->proto);
     if ( !p ) {
         if ( err ) {
-            err->str = (char*)malloc(128);
-            snprintf(err->str, 128, "bad location protocol, %s", loc->proto);
+            net::push_error_info(err, 128, "bad location protocol, %s", loc->proto);
         }
         return 0;
     }
@@ -375,8 +395,7 @@ socklen_t net::sockaddr_from_location(sockaddr *paddr, socklen_t len, const loca
         sockaddr_un * unaddr = (sockaddr_un*)paddr;
         if ( loc->path && strlen(loc->path) >= UNIX_PATH_MAX) {
             if ( err ) {
-                err->str = (char*)malloc(256);
-                snprintf(err->str, 256, "unix path is too long, %s", loc->path);
+                net::push_error_info(err, 256, "unix path is too long, %s", loc->path);
             }
             return 0;
         }
@@ -393,8 +412,7 @@ socklen_t net::sockaddr_from_location(sockaddr *paddr, socklen_t len, const loca
     int r = ::getaddrinfo(loc->host, nullptr, &hints, &res);
     if ( r != 0 ) {
         if ( err ) {
-            err->str = (char*)malloc(128);
-            snprintf(err->str, 128, "getaddrinfo error, %s, %s", loc->host, gai_strerror(r));
+            net::push_error_info(err, 128, "getaddrinfo error, %s, %s", loc->host, gai_strerror(r));
         }
         return 0;
     }
