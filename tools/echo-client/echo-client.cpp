@@ -265,7 +265,7 @@ int net::socket_open_channel(const net::location * loc, int options, net::error_
 
     // connect to remote
     int r = connect(fd, paddr, addrlen);
-    if ( r == -1 ) {
+    if ( r == -1 && errno != EINPROGRESS ) {
         if ( err ) {
             net::push_error_info(err, 128, "connect error, fd=%d, err=%d, %s", 
                 fd, errno, strerror(errno));
