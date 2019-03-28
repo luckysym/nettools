@@ -57,6 +57,9 @@ namespace net {
     /// free location members
     void location_free(struct localtion * loc);
 
+    /// init the error info
+    void init_error_info(error_t * err);
+
     /// free error info members
     void free_error_info(error_t * err);
 
@@ -84,7 +87,7 @@ namespace net {
     /// returns -1 if failed.
     int socket_open_channel(const location *remote, int options, error_info * err);
 
-    /// close socket fd. returns true if success, 
+    /// close socket fd. returns true if success. 
     bool socket_close(int fd, struct error_info *err);
 } // end namespace net 
 
@@ -164,6 +167,12 @@ net::location * net::location_from_url(struct net::location * loc, const char * 
         return loc;
 }
 
+inline 
+void net::init_error_info(net::error_info * err)
+{
+    err->str = nullptr;
+    err->next = nullptr;
+}
 
 inline 
 void net::free_error_info(net::error_info * err)
@@ -305,6 +314,7 @@ int net::socket_channel_recvn(int fd, char *data, int len, int timeout, net::err
                 return -1;
             }
         } else if ( r == 0 ) {
+            if ( err ) net::push_error_info(err, 128, "readn timeout");
             break;  // timeout
         } else {
             if ( errno != EINTR ) {
