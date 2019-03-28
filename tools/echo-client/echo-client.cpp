@@ -150,11 +150,13 @@ net::location * net::location_from_url(struct net::location * loc, const char * 
         location_free(loc);
         if ( proto ) {
             loc->proto = (char *)malloc(proto_len + 1);
-            strncpy(loc->proto, proto, proto_len + 1);
+            memcpy(loc->proto, proto, proto_len);
+            loc->proto[proto_len] = '\0';
         }
         if ( host ) {
             loc->host = (char*)malloc(host_len + 1);
-            strncpy(loc->host, host, host_len + 1);
+            memcpy(loc->host, host, host_len);
+            loc->host[host_len] = '\0';
         } 
         if ( port ) loc->port = atoi(port);
         if ( path ) loc->path = strdup(path);
@@ -203,9 +205,7 @@ int net::socket_open_channel(const net::location * loc, int options, net::error_
     sockattr_t attr;
     sockattr_t * p = sockattr_from_protocol(&attr, loc->proto);
     if ( !p ) {
-        if ( err ) {
-            net::push_error_info(err, 128, "bad socket protocol name: %s", loc->proto);
-        }
+        if ( err ) net::push_error_info(err, 128, "bad socket protocol name: %s", loc->proto);
         return -1;
     }
 
