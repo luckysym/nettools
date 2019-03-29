@@ -140,11 +140,11 @@ void channel_event_proc(net::selector_t * sel, int fd, int event, void *arg)
             
             if ( ch->rdbuf.data ) {
                 net::buffer_pullup(&ch->rdbuf);  // 把缓存中间的数据移到缓存头部
-                remain = ch->rdbuf.cap - ch->rdbuf.end;
+                remain = ch->rdbuf.size - ch->rdbuf.end;
             }
             if ( remain == 0 ) {
-                net::buffer_realloc(&ch->rdbuf, ch->rdbuf.cap + 32);
-                remain = ch->rdbuf.cap - ch->rdbuf.end;
+                net::buffer_realloc(&ch->rdbuf, ch->rdbuf.size + 32);
+                remain = ch->rdbuf.size - ch->rdbuf.end;
             } 
             char * ptr = ch->rdbuf.data + ch->rdbuf.end;
             
