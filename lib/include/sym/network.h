@@ -64,7 +64,6 @@ namespace net {
     const int select_remove  = 16;
     const int select_error   = 32;
 
-
     /// extend the buffer capacity to the new size
     void buffer_alloc(buffer_t *buf, int size);
 
@@ -193,6 +192,16 @@ void net::location_free(net::location * loc) {
     loc->host = nullptr;
     loc->port = 0;
     loc->path = nullptr;
+}
+
+inline 
+void net::location_copy(net::location_t * dest, const net::location_t *src)
+{
+    net::location_free(dest);
+    if ( src->proto ) dest->proto = strdup(src->proto);
+    if ( src->host  ) dest->host  = strdup(src->host );
+    if ( src->path  ) dest->path  = strdup(src->path );
+    dest->port = src->port; 
 }
 
 inline 
