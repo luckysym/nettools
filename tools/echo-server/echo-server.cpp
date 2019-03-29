@@ -93,13 +93,13 @@ void listner_event_proc(net::selector_t * sel, int fd, int event, void *arg)
 
         net::location_init(&remote);
         net::init_error_info(&err);
-        while (1)
+        while (1) {
             int cfd = net::socket_accept_channel(fd, &remote, &err);
-            if ( cfd == -1 && err->str) {
+            if ( cfd == -1 && err.str) {
                 fprintf(stderr, "[error] failed to accept channel, %s\n", err.str);
                 net::free_error_info(&err);
                 net::selector_remove(sel, fd);
-            } else if ( cfd == -1 && err->str == nullptr ) {
+            } else if ( cfd == -1 && err.str == nullptr ) {
                 // no more channel
                 break;
             } else {
