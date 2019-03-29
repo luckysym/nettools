@@ -44,6 +44,13 @@ namespace net {
         char * path;
     } location_t;
 
+    typedef struct buffer {
+        char *    data;
+        int       cap;
+        int       begin;
+        int       end;    
+    } buffer_t;
+
     struct selector_epoll {
 
     };
@@ -58,6 +65,18 @@ namespace net {
     const int select_error   = 32;
 
 
+    /// extend the buffer capacity to the new size
+    void buffer_alloc(buffer_t *buf, int size);
+
+    /// free the buffer members, release its memory
+    void buffer_free(buffer_t *buf);
+
+    /// realloc the buffer with the new capacity size.
+    void buffer_realloc(buffer_t *buf, int size);
+
+    /// move the data in the buffer to the front
+    void buffer_pullup(buffer_t *buf);
+
     /// selector event callback function type
     typedef void (*selector_event_calback)(selector_t *, int fd, int event, void *arg);
 
@@ -71,7 +90,7 @@ namespace net {
     bool selector_add(selector_t * sel, int fd, selector_event_calback cb, void *arg, error_t *err);
 
     /// remove socket from selector
-    bool selector_remove(selector_t * sel, int fd);
+    bool selector_remove(selector_t * sel, int fd, error_t *err);
 
     /// request events.
     bool selector_request(selector_t * sel, int fd, int events, int timeout, error_t *err);
@@ -87,6 +106,9 @@ namespace net {
 
     /// free the location string members
     void location_free(struct location *loc);    
+
+    /// copy location from src to dest, the dest should be free by location_free
+    void location_copy(location_t * dest, const location_t *src);
     
     /// parse url to location, return the localtion pointer if success, null if failed.
     struct location * location_from_url(struct location * loc, const char * url);
@@ -119,6 +141,13 @@ namespace net {
     /// receive message from remote, returns total bytes received if data buffer is full, 
     /// or return -1 if failed, or 0 if timeout.
     int socket_channel_recvn(int fd, char *data, int len, int timeout, error_info *err);
+
+    /// send message to remote, returns the sent byte count, or -1 if failed
+    int socket_channel_send(int fd, const char *data, int len, error_info * err);
+
+    /// receive message from remote, returns the recevied byte count, 
+    /// or return -1 if any error occured, include remote resets the connection.
+    int socket_channel_recv(int fd, char *data, int len, error_info *err);
 
     /// create and open a remote socket channel to the remote location, and returns the socket fd.
     /// returns -1 if failed.
