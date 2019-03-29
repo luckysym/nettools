@@ -26,7 +26,6 @@ namespace net {
     const int sockopt_reuseaddr   = 4;
     const int sockopt_tcp_nodelay = 8;
     
-    
     typedef struct error_info {
         char * str;
         struct error_info * next;
@@ -44,6 +43,41 @@ namespace net {
         int    port;
         char * path;
     } location_t;
+
+    struct selector_epoll {
+
+    };
+    typedef struct selector_epoll selector_t;
+
+    const int select_read    = 1;
+    const int select_write   = 2;
+    const int select_connect = 3;
+    const int select_accept  = 4;
+    const int select_add     = 8;
+    const int select_remove  = 16;
+    const int select_error   = 32;
+
+
+    /// selector event callback function type
+    typedef void (*selector_event_calback)(selector_t *, int fd, int event, void *arg);
+
+    /// create and return a selector, returns null if failed
+    selector_t * selector_create(int options, error_t *err);
+
+    /// destroy the selector created by selector_create
+    bool selector_destroy(selector_t *sel, error_t *err);
+
+    /// add a socket fd and its callback function to the selector.
+    bool selector_add(selector_t * sel, int fd, selector_event_calback cb, void *arg, error_t *err);
+
+    /// remove socket from selector
+    bool selector_remove(selector_t * sel, int fd);
+
+    /// request events.
+    bool selector_request(selector_t * sel, int fd, int events, int timeout, error_t *err);
+
+    /// run the selector
+    int  selector_run(selector_t *sel, error_t *err);
 
     /// gets and returns current timestamp in microseconds from epoch-time 
     int64_t now();
@@ -89,6 +123,14 @@ namespace net {
     /// create and open a remote socket channel to the remote location, and returns the socket fd.
     /// returns -1 if failed.
     int socket_open_channel(const location *remote, int options, error_info * err);
+
+    /// open a local socket listener, return the socket fd or -1 if failed.
+    int socket_open_listener(const location *local, int options, error_info *err);
+
+    /// accept a new channel socke from the serve socket fd, return the client socket fd or -1 if nothing accepted.
+    /// if -1 returned, check the output error, if err->str is null, means no more channel could be accept,
+    /// and if err->str is not null, means accept is error. 
+    int socket_accept_channel(int sfd, location_t *remote, error_t *err);
 
     /// close socket fd. returns true if success. 
     bool socket_close(int fd, struct error_info *err);
@@ -201,10 +243,12 @@ void net::free_error_info(net::error_info * err)
 
 inline 
 void net::push_error_info(net::error_info * err, int size, const char *format, ...) {
-    err->next = (error_t*)malloc(sizeof(error_t));
-    err->next->str = err->str;
-    err->str = (char*)malloc(size);
+    if( err->str ) {
+        err->next = (error_t*)malloc(sizeof(error_t));
+        err->next->str = err->str;
+    }
 
+    err->str = (char*)malloc(size);
     va_list ap;
     va_start(ap, format);
     vsnprintf(err->str, size, format, ap);
@@ -423,14 +467,21 @@ socklen_t net::sockaddr_from_location(sockaddr *paddr, socklen_t len, const loca
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = attr.af;
 
-    int r = ::getaddrinfo(loc->host, nullptr, &hints, &res);
-    if ( r != 0 ) {
-        if ( err ) {
-            net::push_error_info(err, 128, "getaddrinfo error, %s, %s", loc->host, gai_strerror(r));
+    if ( strcmp(loc->host, "*") ) {
+        int r = ::getaddrinfo(loc->host, nullptr, &hints, &res);
+        if ( r != 0 ) {
+            if ( err ) {
+                net::push_error_info(err, 128, "getaddrinfo error, %s, %s", loc->host, gai_strerror(r));
+            }
+            return 0;
         }
-        return 0;
+        memcpy(paddr, res->ai_addr, res->ai_addrlen);     // 地址整体复制输出
+    } else {
+        // 任意地址，除了sa_family和port，其余都是0
+        memset(paddr, 0, len);  
+        paddr->sa_family = attr.af;
     }
-    memcpy(paddr, res->ai_addr, res->ai_addrlen);     // 地址整体复制输出
+    
     ((sockaddr_in*)paddr)->sin_port = htons(loc->port);   // 设置端口，in和in6端口字段位置相同
     return res->ai_addrlen;
 } // end net::sockaddr_from_location
@@ -459,3 +510,77 @@ net::socket_attrib * net::sockattr_from_protocol(net::socket_attrib * attr, cons
     }
     return attr;
 }
+
+inline
+int net::socket_open_listener(const net::location *local, int options, net::error_info *err)
+{
+    // init socket attributes
+    sockattr_t attr;
+    sockattr_t * p = sockattr_from_protocol(&attr, local->proto);
+    if ( !p ) {
+        if ( err ) net::push_error_info(err, 128, "bad socket protocol name: %s", local->proto);
+        return -1;
+    }
+
+    // init socket address
+    char addrbuf[128];
+    sockaddr *paddr = (sockaddr*)addrbuf;
+    error_t e2;
+    socklen_t addrlen = sockaddr_from_location((sockaddr*)addrbuf, 128, local, &e2);
+    if ( addrlen == 0 ) {
+        if ( err ) {
+            net::push_error_info(err, 128, "bad socket location addr: %s/%s/%d/%s", 
+                local->proto, local->host?local->host:"<none>", local->port, local->path?local->path:"<none>");
+        }
+        free_error_info(&e2);
+        return -1;
+        
+    }
+
+    // create socket
+    int nonblock = (options & sockopt_nonblocked)?SOCK_NONBLOCK:0;
+    int fd = ::socket(attr.af, attr.type | nonblock | SOCK_CLOEXEC, attr.proto);
+    if ( fd == -1 ) {
+        if ( err ) {
+            net::push_error_info(err, 128, "failed to create socket, %d, %s", errno, strerror(errno));
+        }
+        return -1;
+    }
+
+    // set socket options
+    if ( options & sockopt_reuseaddr) {
+        int opt = 1;
+        int r = setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &opt, sizeof(opt));
+        if ( r == -1 ) {
+            if ( err ) {
+                net::push_error_info(
+                    err, 128, "setsockopt tcp_nodelay error, fd=%d, err=%d, %s", 
+                    fd, errno, strerror(errno));
+            }
+            close(fd);
+            return -1;
+        }
+    }
+
+    // bind socket to address
+    int r = ::bind(fd, paddr, addrlen);
+    if ( r == -1 ) {
+        if ( err ) {
+            net::push_error_info(err, 128, "bind socket error, fd: %d, %s", fd, strerror(errno));
+        }
+        close(fd);
+        return -1;
+    }
+
+    // listen
+    r = ::listen(fd, SOMAXCONN);
+    if ( r == -1 ) {
+        if ( err ) {
+            net::push_error_info(err, 128, "bind socket error, fd: %d, %s", fd, strerror(errno));
+        }
+        close(fd);
+        return -1;
+    }
+
+    return fd;
+} // end socket_open_listener
