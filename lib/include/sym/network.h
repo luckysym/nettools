@@ -20,9 +20,12 @@
 
 namespace net {
     
+    // socket options bit flags
     const int sockopt_nonblocked  = 1;
     const int sockopt_linger      = 2;
-    const int sockopt_tcp_nodelay = 4;
+    const int sockopt_reuseaddr   = 4;
+    const int sockopt_tcp_nodelay = 8;
+    
     
     typedef struct error_info {
         char * str;
