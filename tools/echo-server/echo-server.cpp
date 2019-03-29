@@ -1,9 +1,11 @@
 
 #include <sym/network.h>
 #include <stdio.h>
+#include <assert.h>
 
+void listner_event_proc(net::selector_t * sel, int fd, int event, void *arg);
+void channel_event_proc(net::selector_t * sel, int fd, int event, void *arg);
 
-void listner_event_proc(int fd, int event, void *arg);
 
 /**
  * command:  echosvr <remote_url> <message> 
@@ -41,9 +43,9 @@ int main(int argc, char **argv)
     sleep(1);
 
     // create selector 
-    net::selector_t * selector = net::selector_create(&err);
-    if ( epfd == -1 ) {
-        fprintf(stderr, "[error] failed to create selector, %s", err->str);
+    net::selector_t * selector = net::selector_create(0, &err);
+    if ( !selector ) {
+        fprintf(stderr, "[error] failed to create selector, %s", err.str);
         net::free_error_info(&err);
         net::socket_close(sfd, nullptr);
         return -1;
@@ -52,21 +54,28 @@ int main(int argc, char **argv)
     // add listener to selector
     bool isok = net::selector_add(selector, sfd, listner_event_proc, nullptr, &err);
     if ( !isok ) {
-        fprintf(stderr, "[error] failed to create selector, %s", err->str);
+        fprintf(stderr, "[error] failed to create selector, %s", err.str);
         net::free_error_info(&err);
+        net::selector_destroy(selector, nullptr);
         net::socket_close(sfd, nullptr);
         return -1;
     }
 
-    while (1) {
-        // request accept event for no timeout
-        int revents = net::select_read;
-        isok = net::selector_request(selector, sfd, revents, -1, &err);
-        if ( !isok ) {
-            fprintf(stderr, "[error] failed to create selector, %s", err->str);
-            net::free_error_info(&err);
-            break;
-        }   
+    // request accept event for no timeout
+    int revents = net::select_accept;
+    isok = net::selector_request(selector, sfd, revents, -1, &err);
+    if ( !isok ) {
+        fprintf(stderr, "[error] failed to create selector, %s", err.str);
+        net::free_error_info(&err);
+        net::selector_destroy(selector, nullptr);
+        net::socket_close(sfd, nullptr);
+        return -1;
+    }   
+    
+    int r = net::selector_run(selector, &err);    
+    if ( r < 0 ) {
+        fprintf(stderr, "[error] failed to run selector, %s", err.str);
+        net::free_error_info(&err);
     }
 
     net::selector_destroy(selector, nullptr);
@@ -75,7 +84,38 @@ int main(int argc, char **argv)
     return 0;
 }
 
-void listner_event_proc(int fd, int event, void *arg)
+// 监听socket事件回调
+void listner_event_proc(net::selector_t * sel, int fd, int event, void *arg)
 {
+    if ( event == net::select_accept ) {
+        net::location_t remote;
+        net::error_t    err;
+
+        net::location_init(&remote);
+        net::init_error_info(&err);
+        while (1)
+            int cfd = net::socket_accept_channel(fd, &remote, &err);
+            if ( cfd == -1 && err->str) {
+                fprintf(stderr, "[error] failed to accept channel, %s\n", err.str);
+                net::free_error_info(&err);
+                net::selector_remove(sel, fd);
+            } else if ( cfd == -1 && err->str == nullptr ) {
+                // no more channel
+                break;
+            } else {
+                fprintf(stderr, "[info] new client accept, fd:%d, %s:%d\n", cfd, remote.host, remote.port);
+                net::location_free(&remote);
+
+                bool isok = net::selector_add(sel, cfd, channel_event_proc, nullptr, &err);
+                assert(isok);
+                isok = net::selector_request(sel, cfd, net::select_read, -1, &err);
+                assert(isok);
+            }
+        } // end while  
+    } else if ( event == net::select_remove) {
+        fprintf(stderr, "[info] listener will be closed, fd:%d\n", fd);
+        net::socket_close(fd, nullptr);
+    }
     return ;
 }
+
