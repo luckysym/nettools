@@ -6,6 +6,12 @@
 void listner_event_proc(net::selector_t * sel, int fd, int event, void *arg);
 void channel_event_proc(net::selector_t * sel, int fd, int event, void *arg);
 
+struct echo_channel 
+{
+    int               fd;
+    net::location_t   remote;
+    net::buffer_t     rdbuf;
+};
 
 /**
  * command:  echosvr <remote_url> <message> 
@@ -60,17 +66,6 @@ int main(int argc, char **argv)
         net::socket_close(sfd, nullptr);
         return -1;
     }
-
-    // request accept event for no timeout
-    int revents = net::select_accept;
-    isok = net::selector_request(selector, sfd, revents, -1, &err);
-    if ( !isok ) {
-        fprintf(stderr, "[error] failed to create selector, %s", err.str);
-        net::free_error_info(&err);
-        net::selector_destroy(selector, nullptr);
-        net::socket_close(sfd, nullptr);
-        return -1;
-    }   
     
     int r = net::selector_run(selector, &err);    
     if ( r < 0 ) {
@@ -98,24 +93,127 @@ void listner_event_proc(net::selector_t * sel, int fd, int event, void *arg)
             if ( cfd == -1 && err.str) {
                 fprintf(stderr, "[error] failed to accept channel, %s\n", err.str);
                 net::free_error_info(&err);
-                net::selector_remove(sel, fd);
+                net::selector_remove(sel, fd, &err);
             } else if ( cfd == -1 && err.str == nullptr ) {
                 // no more channel
+                net::location_free(&remote);
                 break;
             } else {
                 fprintf(stderr, "[info] new client accept, fd:%d, %s:%d\n", cfd, remote.host, remote.port);
+                
+                echo_channel *ch = new echo_channel;
+                memset(ch, 0, sizeof(echo_channel));
+                ch->fd = cfd;
+                net::location_copy(&ch->remote, &remote);
+                net::buffer_alloc(&ch->rdbuf, 256);
+                
+                bool isok = net::selector_add(sel, cfd, channel_event_proc, ch, &err);
+                assert(isok);
                 net::location_free(&remote);
-
-                bool isok = net::selector_add(sel, cfd, channel_event_proc, nullptr, &err);
-                assert(isok);
-                isok = net::selector_request(sel, cfd, net::select_read, -1, &err);
-                assert(isok);
             }
         } // end while  
     } else if ( event == net::select_remove) {
         fprintf(stderr, "[info] listener will be closed, fd:%d\n", fd);
         net::socket_close(fd, nullptr);
+    } else if ( event == net::select_add ) {
+        // request accept event for no timeout
+        net::error_t err;
+        net::init_error_info(&err);
+        int revents = net::select_accept;
+        bool isok = net::selector_request(sel, fd, revents, -1, &err);
+        assert( !isok );
     }
     return ;
 }
 
+void channel_event_proc(net::selector_t * sel, int fd, int event, void *arg)
+{
+    net::error_t err;
+    net::init_error_info(&err);
+
+    echo_channel * ch = (echo_channel *)arg;
+    assert(ch);
+
+    if ( event == net::select_read ) {
+        while (1) {
+            int    remain = 0;
+            
+            if ( ch->rdbuf.data ) {
+                net::buffer_pullup(&ch->rdbuf);  // 把缓存中间的数据移到缓存头部
+                remain = ch->rdbuf.cap - ch->rdbuf.end;
+            }
+            if ( remain == 0 ) {
+                net::buffer_realloc(&ch->rdbuf, ch->rdbuf.cap + 32);
+                remain = ch->rdbuf.cap - ch->rdbuf.end;
+            } 
+            char * ptr = ch->rdbuf.data + ch->rdbuf.end;
+            
+            // receive data
+            int r = net::socket_channel_recv(ch->fd, ptr, remain, &err);
+            if ( r > 0 ) {
+                // data received
+                ch->rdbuf.end += r;
+
+                // request write
+                bool sok = net::selector_request(sel, fd, net::select_write, -1, &err);
+                assert(sok);
+            } else if ( r == 0 ) {
+                // nothing received
+                break;
+            } else {
+                // error, or remote closed
+                fprintf(stderr, "[info] channel recv failed, fd:%d\n", fd);
+                bool sok = net::selector_remove(sel, fd, &err);
+                assert(sok);
+            }
+        }
+    } else if ( event == net::select_write ) {
+        while ( 1 ) {
+            char * ptr = ch->rdbuf.data + ch->rdbuf.begin;
+            int    remain = ch->rdbuf.end - ch->rdbuf.begin;
+            
+            if ( remain == 0 ) {
+                // all sent, receive next
+                bool sok = net::selector_request(sel, fd, net::select_read, -1, &err);
+                assert(sok);
+                break; 
+            }
+
+            int s = net::socket_channel_send(ch->fd, ptr, remain, &err);
+            if ( s > 0 ) {
+                // sent some ok
+                ch->rdbuf.begin += s;
+                
+            } else if ( s == 0 ) {
+                // no data sent
+                break;
+            } else {
+                // send error
+                fprintf(stderr, "[info] channel send failed, fd:%d\n", fd);
+                bool sok = net::selector_remove(sel, fd, &err);
+                assert(sok);
+            }
+        }
+    } else if ( event == net::select_remove) {
+
+        fprintf(stderr, "[info] channel will be closed, fd:%d\n", fd);
+
+        net::socket_close(ch->fd, nullptr);
+        net::buffer_free(&ch->rdbuf);
+        net::location_free(&ch->remote);
+
+        ch->fd = -1;
+    } else if ( event == net::select_add ) {
+        
+        // channel added, wait for reading
+        bool sok = net::selector_request(sel, fd, net::select_read, -1, &err);
+        assert(sok);
+        
+    } else if ( event == net::select_error ) {
+        fprintf(stderr, "[info] channel wait error, fd:%d\n", fd);
+        bool sok = net::selector_remove(sel, fd, &err);
+        assert(sok);
+    } else {
+        assert("bad select event" == nullptr);
+    }
+}
