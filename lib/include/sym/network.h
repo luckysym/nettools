@@ -111,7 +111,7 @@ namespace net {
     void location_copy(location_t * dest, const location_t *src);
     
     /// parse url to location, return the localtion pointer if success, null if failed.
-    struct location * location_from_url(struct location * loc, const char * url);
+    location_t * location_from_url(struct location * loc, const char * url);
 
     /// free location members
     void location_free(struct localtion * loc);
@@ -133,6 +133,9 @@ namespace net {
 
     /// 根据locaction设置socketaddr
     socklen_t sockaddr_from_location(sockaddr *paddr, socklen_t len, const location *loc, error_t * err);
+
+    /// convert sockaddr to location, returns the localtion pointer if succeed, or null if error 
+    location_t * sockaddr_to_location(location_t *loc, const sockaddr * addr, socklen_t len);
 
     /// send message to remote, and return if all data sent or error or timeout, 
     /// returns total bytes sent if succeeded, or return -1 if failed, or 0 if timeout .
@@ -159,7 +162,7 @@ namespace net {
     /// accept a new channel socke from the serve socket fd, return the client socket fd or -1 if nothing accepted.
     /// if -1 returned, check the output error, if err->str is null, means no more channel could be accept,
     /// and if err->str is not null, means accept is error. 
-    int socket_accept_channel(int sfd, location_t *remote, error_t *err);
+    int socket_accept(int sfd, location_t *remote, error_t *err);
 
     /// close socket fd. returns true if success. 
     bool socket_close(int fd, struct error_info *err);
@@ -676,3 +679,61 @@ int net::socket_open_listener(const net::location *local, int options, net::erro
 
     return fd;
 } // end socket_open_listener
+
+inline 
+int net::socket_send(int fd, const char *data, int len, net::error_t *err)
+{
+    int r = ::send(fd, data, len, 0);
+    if ( r >= 0 ) return r;   // send ok
+    else {
+        int e = errno;
+        if ( e == EINTR || e == EAGAIN) return 0; // nothing send, try again
+        else {
+            net::push_error_info(err, 128, "socket send error, fd: %d, err: %d, %s",
+                fd, e, strerror(e));
+            return -1;  // send failed
+        }
+    }
+}
+
+inline 
+int net::socket_recv(int fd, char *data, int len, net::error_t *err)
+{
+    int r = ::recv(fd, data, len, 0);
+    if ( r > 0 ) return r;
+    if ( r == 0 ) {
+        net::push_error_info(err, 128, "socket closed by remote, fd: %d", fd);
+        return -1; 
+    } else {
+        int e = errno;
+        if ( e == EINTR || e == EAGAIN) return 0; // nothing recv, try again
+        else {
+            net::push_error_info(err, 128, "socket recv error, fd: %d, err: %d, %s",
+                fd, e, strerror(e));
+            return -1;  // recv failed
+        }
+    }
+}
+
+int net::socket_accept(int sfd, location_t *remote, error_t *err)
+{
+    char addrbuf[128];
+    socklen_t addrlen = 128;
+    int cfd = ::accept(sfd, (sockaddr *)addrbuf, &addrlen);
+    if ( cfd >= 0 ) {
+        // new connection accepted
+        location_t * p = net::sockaddr_to_location(remote, (sockaddr*)addrbuf, addrlen);
+        assert(p);
+        return cfd;
+    } else {
+        int e = errno;
+        if ( e == EINTR || e == EAGAIN) {
+            net::free_error_info(err);
+            return -1; // nothing recv, try again
+        } else {
+            net::push_error_info(err, 128, "socket accept error, fd: %d, err: %d, %s",
+                sfd, e, strerror(e));
+            return -1;  // recv failed
+        }
+    }
+}
