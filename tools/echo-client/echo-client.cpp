@@ -40,7 +40,7 @@ int main(int argc, char **argv)
 
     // send message
     int len = strlen(message);
-    int bytes = net::socket_channel_sendn(fd, message, len, 5000, &err);
+    int bytes = net::socket_sendn(fd, message, len, 5000, &err);
     if ( bytes != len ) {
         fprintf(stderr, "[error] failed to send message, fd: %d, len: %d, sent: %d, %s\n", fd, len, bytes, err.str);
         net::free_error_info(&err);
@@ -50,7 +50,7 @@ int main(int argc, char **argv)
 
     // receive message
     char * rbuf = new char[len + 1];
-    bytes = net::socket_channel_recvn(fd, rbuf, len, 5000, &err);
+    bytes = net::socket_recvn(fd, rbuf, len, 5000, &err);
     if ( bytes != len ) {
         fprintf(stderr, "[error] failed to recv message, fd: %d, len: %d, received: %d, %s\n", fd, len, bytes, err.str);
         net::free_error_info(&err);

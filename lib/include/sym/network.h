@@ -136,18 +136,18 @@ namespace net {
 
     /// send message to remote, and return if all data sent or error or timeout, 
     /// returns total bytes sent if succeeded, or return -1 if failed, or 0 if timeout .
-    int socket_channel_sendn(int fd, const char *data, int len, int timeout, error_info * err);
+    int socket_sendn(int fd, const char *data, int len, int timeout, error_info * err);
 
     /// receive message from remote, returns total bytes received if data buffer is full, 
     /// or return -1 if failed, or 0 if timeout.
-    int socket_channel_recvn(int fd, char *data, int len, int timeout, error_info *err);
+    int socket_recvn(int fd, char *data, int len, int timeout, error_info *err);
 
     /// send message to remote, returns the sent byte count, or -1 if failed
-    int socket_channel_send(int fd, const char *data, int len, error_info * err);
+    int socket_send(int fd, const char *data, int len, error_info * err);
 
     /// receive message from remote, returns the recevied byte count, 
     /// or return -1 if any error occured, include remote resets the connection.
-    int socket_channel_recv(int fd, char *data, int len, error_info *err);
+    int socket_recv(int fd, char *data, int len, error_info *err);
 
     /// create and open a remote socket channel to the remote location, and returns the socket fd.
     /// returns -1 if failed.
@@ -427,7 +427,7 @@ int net::socket_open_channel(const net::location * loc, int options, net::error_
 } // end net::socket_open_channel
 
 inline 
-int net::socket_channel_recvn(int fd, char *data, int len, int timeout, net::error_info * err)
+int net::socket_recvn(int fd, char *data, int len, int timeout, net::error_info * err)
 {
     struct pollfd pfd;
     pfd.fd = fd;
@@ -472,7 +472,7 @@ int net::socket_channel_recvn(int fd, char *data, int len, int timeout, net::err
 }
 
 inline 
-int net::socket_channel_sendn(int fd, const char *data, int len, int timeout, net::error_info * err)
+int net::socket_sendn(int fd, const char *data, int len, int timeout, net::error_info * err)
 {
     struct pollfd pfd;
     pfd.fd = fd;

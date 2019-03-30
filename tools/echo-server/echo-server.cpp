@@ -149,7 +149,7 @@ void channel_event_proc(net::selector_t * sel, int fd, int event, void *arg)
             char * ptr = ch->rdbuf.data + ch->rdbuf.end;
             
             // receive data
-            int r = net::socket_channel_recv(ch->fd, ptr, remain, &err);
+            int r = net::socket_recv(ch->fd, ptr, remain, &err);
             if ( r > 0 ) {
                 // data received
                 ch->rdbuf.end += r;
@@ -179,7 +179,7 @@ void channel_event_proc(net::selector_t * sel, int fd, int event, void *arg)
                 break; 
             }
 
-            int s = net::socket_channel_send(ch->fd, ptr, remain, &err);
+            int s = net::socket_send(ch->fd, ptr, remain, &err);
             if ( s > 0 ) {
                 // sent some ok
                 ch->rdbuf.begin += s;
