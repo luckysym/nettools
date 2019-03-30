@@ -5,6 +5,7 @@
 #include <sys/time.h>
 #include <sys/un.h>
 #include <netinet/tcp.h>
+#include <arpa/inet.h>
 #include <poll.h>
 #include <unistd.h>
 #include <netdb.h>
@@ -528,6 +529,44 @@ bool net::socket_close( int fd, struct net::error_info * err)
     
     if ( err ) net::push_error_info(err, 128, "close fd failed, fd:%d, %s", fd, strerror(errno)); 
     return false;
+}
+
+inline
+net::location_t * net::sockaddr_to_location(net::location_t *loc, const sockaddr* addr, socklen_t len)
+{
+    location_free(loc);
+    if ( addr->sa_family == AF_INET ) {
+        char hostbuf[128];
+        const sockaddr_in *pin = (const sockaddr_in*)addr;
+        const char * host = ::inet_ntop(addr->sa_family, &pin->sin_addr, hostbuf, 128);
+        if ( host ) {
+            if ( loc->host ) free(loc->host);
+            loc->host = strdup(hostbuf);
+            loc->port = ntohs(pin->sin_port);
+            return loc;
+        } else {
+            return nullptr;
+        }
+    } else if ( addr->sa_family == AF_INET6 ) {
+        char hostbuf[128];
+        const sockaddr_in6 *pin = (const sockaddr_in6*)addr;
+        const char * host = ::inet_ntop(addr->sa_family, &pin->sin6_addr, hostbuf, 128);
+        if ( host ) {
+            if ( loc->host ) free(loc->host);
+            loc->host = strdup(hostbuf);
+            loc->port = ntohs(pin->sin6_port);
+            return loc;
+        } else {
+            return nullptr;
+        }
+    } else if ( addr->sa_family == AF_UNIX ) {
+        const sockaddr_un *pun = (const sockaddr_un*)addr;
+        if ( loc->path ) free(loc->path);
+            loc->path = strdup(pun->sun_path);
+            return loc;
+    } else {
+        return nullptr;
+    }
 }
 
 inline
