@@ -3,6 +3,7 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/time.h>
+#include <sys/epoll.h>
 #include <sys/un.h>
 #include <netinet/tcp.h>
 #include <arpa/inet.h>
@@ -46,10 +47,42 @@ namespace net {
         char * path;
     } location_t;
 
-    struct selector_epoll {
+    template<class T>
+    struct basic_array {
+        T * values;
+        int cap;
+        int len;
+    }; // end struct basic_array
 
-    };
-    typedef struct selector_epoll selector_t;
+    template<class T>
+    basic_array<T> * array_alloc(basic_array<T> * arr, int cap);
+
+    template<class T>
+    basic_array<T> * array_resize(basic_array<T> * arr, int size);
+    
+    template<class T>
+    void array_free(basic_array<T> * arr);
+
+    template <class T>
+    struct basic_link_node {
+        T  value;
+        struct basic_link_node<T> *next;
+    }; // struct baskc_link_node
+
+    template<class T>
+    struct basic_list {
+        basic_link_node<T> * front;
+        basic_link_node<T> * back;
+    }; // end struct basic_list
+
+    template<class T>
+    basic_link_node<T> * list_push_back(basic_list<T> * lst, basic_link_node<T> *node); 
+
+    template<class T>
+    basic_link_node<T> * list_pop_front(basic_list<T> * lst);
+
+    template<class T>
+    basic_link_node<T> * list_init(basic_list<T> * lst);
 
     const int select_read    = 1;
     const int select_write   = 2;
@@ -58,12 +91,30 @@ namespace net {
     const int select_add     = 8;
     const int select_remove  = 16;
     const int select_error   = 32;
+    
+    const int c_init_list_size = 128;  ///< 列表初始化大小
 
     /// selector event callback function type
-    typedef void (*selector_event_calback)(selector_t *, int fd, int event, void *arg);
+    typedef void (*selector_event_calback)(int fd, int event, void *arg);
+
+    typedef struct selector_item {
+        int fd;
+        int requests;    ///< requested select events, combination of select_*
+        selector_event_calback  callback;
+        void *arg;
+    } selectitem_t;
+
+    struct selector_epoll {
+        int epfd;     ///< epoll fd
+        int count;    ///< total fd registered in epoll
+        basic_array<selectitem_t>  items;   ///< registered items
+        basic_list<selectitem_t>   requests;   ///< request queue
+        basic_array<epoll_event>   events;   ///< receive the output events from epoll_wait
+    };
+    typedef struct selector_epoll selector_t;
 
     /// create and return a selector, returns null if failed
-    selector_t * selector_create(int options, error_t *err);
+    selector_t * selector_init(selector_t *sel, int options, error_t *err);
 
     /// destroy the selector created by selector_create
     bool selector_destroy(selector_t *sel, error_t *err);
@@ -706,3 +757,50 @@ int net::socket_accept(int sfd, location_t *remote, error_t *err)
     }
 }
 
+inline 
+net::selector_t * net::selector_init(net::selector_t *sel, int options, error_t *err)
+{
+    int fd = epoll_create1(EPOLL_CLOEXEC);
+    if ( fd == -1 ) {
+        net::push_error_info(err, 128, "epoll_create1 error, %d, %s", errno, strerror(errno));
+        return nullptr;
+    }
+
+    sel->epfd = fd;
+    sel->count = 0;
+    array_alloc(&sel->items, c_init_list_size);
+    array_alloc(&sel->events, c_init_list_size);
+    list_init(&sel->requests);
+
+    return sel;
+} // end net::selector_init
+
+inline 
+bool net::selector_destroy(net::selector_t *sel, net::error_t *err)
+{
+    if ( sel->count > 0 ) {
+        for( int i = 0; i < sel->items.len; ++i ) {
+            if ( sel->items.values[i].fd == -1 ) continue;
+            int fd = sel->items.values[i].fd;
+            auto callback = sel->items.values[i].callback;
+            auto arg = sel->items.values[i].arg;
+            epoll_ctl(sel->epfd, EPOLL_CTL_DEL, fd, nullptr);
+            callback(fd, select_remove, arg);
+
+            sel->items.values[i].fd = -1;
+        }
+        sel->count = 0;
+    }
+    array_free(&sel->items);
+    
+    basic_link_node<selectitem_t> * node = list_pop_front(&sel->requests);
+    while ( node ) {
+        free(node);
+        node = list_pop_front(&sel->requests);
+    }
+
+    array_free(&sel->events);
+    close(sel->epfd);
+    sel->epfd = -1;
+    return true;
+} 
