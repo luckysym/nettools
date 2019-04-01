@@ -4,14 +4,15 @@
 #include <stdio.h>
 #include <assert.h>
 
-void listner_event_proc(net::selector_t * sel, int fd, int event, void *arg);
-void channel_event_proc(net::selector_t * sel, int fd, int event, void *arg);
+void listner_event_proc(int fd, int event, void *arg);
+void channel_event_proc(int fd, int event, void *arg);
 
 struct echo_channel 
 {
     int               fd;
     net::location_t   remote;
     io::buffer_t      rdbuf;
+    net::selector_t * selector;
 };
 
 /**
@@ -50,8 +51,9 @@ int main(int argc, char **argv)
     sleep(1);
 
     // create selector 
-    net::selector_t * selector = net::selector_create(0, &err);
-    if ( !selector ) {
+    net::selector_t selector ;
+    auto sel = net::selector_init(&selector, 0, &err);
+    if ( !sel ) {
         fprintf(stderr, "[error] failed to create selector, %s", err.str);
         net::free_error_info(&err);
         net::socket_close(sfd, nullptr);
@@ -59,30 +61,33 @@ int main(int argc, char **argv)
     }
 
     // add listener to selector
-    bool isok = net::selector_add(selector, sfd, listner_event_proc, nullptr, &err);
+    bool isok = net::selector_add(sel, sfd, listner_event_proc, &sel, &err);
     if ( !isok ) {
         fprintf(stderr, "[error] failed to create selector, %s", err.str);
         net::free_error_info(&err);
-        net::selector_destroy(selector, nullptr);
+        net::selector_destroy(sel, nullptr);
         net::socket_close(sfd, nullptr);
         return -1;
     }
     
-    int r = net::selector_run(selector, &err);    
+    int r = net::selector_run(sel, &err);    
     if ( r < 0 ) {
         fprintf(stderr, "[error] failed to run selector, %s", err.str);
         net::free_error_info(&err);
     }
 
-    net::selector_destroy(selector, nullptr);
+    net::selector_destroy(sel, nullptr);
     net::socket_close(sfd, nullptr);
 
     return 0;
 }
 
 // 监听socket事件回调
-void listner_event_proc(net::selector_t * sel, int fd, int event, void *arg)
+void listner_event_proc(int fd, int event, void *arg)
 {
+    net::selector_t *sel = (net::selector_t*)arg;
+    assert(sel);
+
     if ( event == net::select_accept ) {
         net::location_t remote;
         net::error_t    err;
@@ -105,6 +110,7 @@ void listner_event_proc(net::selector_t * sel, int fd, int event, void *arg)
                 echo_channel *ch = new echo_channel;
                 memset(ch, 0, sizeof(echo_channel));
                 ch->fd = cfd;
+                ch->selector = sel;
                 net::location_copy(&ch->remote, &remote);
                 io::buffer_alloc(&ch->rdbuf, 256);
                 
@@ -127,13 +133,16 @@ void listner_event_proc(net::selector_t * sel, int fd, int event, void *arg)
     return ;
 }
 
-void channel_event_proc(net::selector_t * sel, int fd, int event, void *arg)
+void channel_event_proc(int fd, int event, void *arg)
 {
     net::error_t err;
     net::init_error_info(&err);
 
     echo_channel * ch = (echo_channel *)arg;
     assert(ch);
+
+    net::selector_t *sel = ch->selector;
+    assert(sel);
 
     if ( event == net::select_read ) {
         while (1) {
