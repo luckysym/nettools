@@ -1,5 +1,6 @@
 
 #include <sym/network.h>
+#include <sym/io.h>
 #include <stdio.h>
 #include <assert.h>
 
@@ -10,7 +11,7 @@ struct echo_channel
 {
     int               fd;
     net::location_t   remote;
-    net::buffer_t     rdbuf;
+    io::buffer_t      rdbuf;
 };
 
 /**
@@ -105,7 +106,7 @@ void listner_event_proc(net::selector_t * sel, int fd, int event, void *arg)
                 memset(ch, 0, sizeof(echo_channel));
                 ch->fd = cfd;
                 net::location_copy(&ch->remote, &remote);
-                net::buffer_alloc(&ch->rdbuf, 256);
+                io::buffer_alloc(&ch->rdbuf, 256);
                 
                 bool isok = net::selector_add(sel, cfd, channel_event_proc, ch, &err);
                 assert(isok);
@@ -139,11 +140,11 @@ void channel_event_proc(net::selector_t * sel, int fd, int event, void *arg)
             int    remain = 0;
             
             if ( ch->rdbuf.data ) {
-                net::buffer_pullup(&ch->rdbuf);  // 把缓存中间的数据移到缓存头部
+                io::buffer_pullup(&ch->rdbuf);  // 把缓存中间的数据移到缓存头部
                 remain = ch->rdbuf.size - ch->rdbuf.end;
             }
             if ( remain == 0 ) {
-                net::buffer_realloc(&ch->rdbuf, ch->rdbuf.size + 32);
+                io::buffer_realloc(&ch->rdbuf, ch->rdbuf.size + 32);
                 remain = ch->rdbuf.size - ch->rdbuf.end;
             } 
             char * ptr = ch->rdbuf.data + ch->rdbuf.end;
@@ -199,7 +200,7 @@ void channel_event_proc(net::selector_t * sel, int fd, int event, void *arg)
         fprintf(stderr, "[info] channel will be closed, fd:%d\n", fd);
 
         net::socket_close(ch->fd, nullptr);
-        net::buffer_free(&ch->rdbuf);
+        io::buffer_free(&ch->rdbuf);
         net::location_free(&ch->remote);
 
         ch->fd = -1;
