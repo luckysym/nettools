@@ -64,26 +64,28 @@ namespace net {
     void array_free(basic_array<T> * arr);
 
     template <class T>
-    struct basic_link_node {
+    struct basic_dlink_node {
         T  value;
-        struct basic_link_node<T> *next;
+        struct basic_dlink_node<T> *next;
+        struct basic_dlink_node<T> *prev;
     }; // struct baskc_link_node
 
     template<class T>
-    struct basic_list {
-        basic_link_node<T> * front;
-        basic_link_node<T> * back;
-    }; // end struct basic_list
+    struct basic_dlink_list {
+        basic_dlink_node<T> * front;
+        basic_dlink_node<T> * back;
+    }; // end struct basic_dlink_list
 
     template<class T>
-    basic_link_node<T> * list_push_back(basic_list<T> * lst, basic_link_node<T> *node); 
+    basic_dlink_node<T> * dlinklist_push_back(basic_dlink_list<T> * lst, basic_dlink_node<T> *node); 
 
     template<class T>
-    basic_link_node<T> * list_pop_front(basic_list<T> * lst);
+    basic_dlink_node<T> * dlinklist_pop_front(basic_dlink_list<T> * lst);
 
     template<class T>
-    basic_link_node<T> * list_init(basic_list<T> * lst);
+    basic_dlink_node<T> * dlinklist_init(basic_dlink_list<T> * lst);
 
+    const int select_none    = 0;
     const int select_read    = 1;
     const int select_write   = 2;
     const int select_connect = 3;
@@ -97,18 +99,19 @@ namespace net {
     /// selector event callback function type
     typedef void (*selector_event_calback)(int fd, int event, void *arg);
 
-    typedef struct selector_item {
+    typedef struct select_item {
         int fd;
         int requests;    ///< requested select events, combination of select_*
         selector_event_calback  callback;
         void *arg;
     } selectitem_t;
+    typedef basic_dlink_node<select_item> select_item_node;
 
     struct selector_epoll {
         int epfd;     ///< epoll fd
         int count;    ///< total fd registered in epoll
         basic_array<selectitem_t>  items;   ///< registered items
-        basic_list<selectitem_t>   requests;   ///< request queue
+        basic_dlink_list<selectitem_t>   requests;   ///< request queue
         basic_array<epoll_event>   events;   ///< receive the output events from epoll_wait
     };
     typedef struct selector_epoll selector_t;
@@ -200,7 +203,6 @@ namespace net {
     /// close socket fd. returns true if success. 
     bool socket_close(int fd, struct error_info *err);
 } // end namespace net 
-
 
 inline
 int64_t net::now() 
@@ -770,7 +772,7 @@ net::selector_t * net::selector_init(net::selector_t *sel, int options, error_t 
     sel->count = 0;
     array_alloc(&sel->items, c_init_list_size);
     array_alloc(&sel->events, c_init_list_size);
-    list_init(&sel->requests);
+    dlinklist_init(&sel->requests);
 
     return sel;
 } // end net::selector_init
@@ -793,10 +795,10 @@ bool net::selector_destroy(net::selector_t *sel, net::error_t *err)
     }
     array_free(&sel->items);
     
-    basic_link_node<selectitem_t> * node = list_pop_front(&sel->requests);
+    basic_dlink_node<selectitem_t> * node = dlinklist_pop_front(&sel->requests);
     while ( node ) {
         free(node);
-        node = list_pop_front(&sel->requests);
+        node = dlinklist_pop_front(&sel->requests);
     }
 
     array_free(&sel->events);
@@ -804,3 +806,34 @@ bool net::selector_destroy(net::selector_t *sel, net::error_t *err)
     sel->epfd = -1;
     return true;
 } 
+
+inline 
+bool net::selector_add(net::selector_t * sel, int fd, selector_event_calback cb, void *arg, error_t *err)
+{
+    select_item_node * node = (select_item_node *)malloc(sizeof(select_item_node));
+    node->value.fd = fd;
+    node->value.requests = select_add;
+    node->value.callback = cb;
+    node->value.arg = arg;
+    node->next = nullptr;
+    node->prev = nullptr;
+
+    auto p = dlinklist_push_back(&sel->requests, node);
+    assert(p == node);
+    return true;
+}
+
+inline 
+bool net::selector_remove(net::selector_t * sel, int fd, error_t *err) 
+{
+    select_item_node * node = (select_item_node *)malloc(sizeof(select_item_node));
+    node->value.fd = fd;
+    node->value.requests = select_remove;
+    node->next = nullptr;
+    node->prev = nullptr;
+
+    auto p = dlinklist_push_back(&sel->requests, node);
+    assert(p);
+    return true;
+}
+
