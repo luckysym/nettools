@@ -101,18 +101,27 @@ namespace net {
 
     typedef struct select_item {
         int fd;
-        int requests;    ///< requested select events, combination of select_*
+        int events;    ///< requested select events, combination of select_*
         selector_event_calback  callback;
-        void *arg;
-    } selectitem_t;
-    typedef basic_dlink_node<select_item> select_item_node;
+        void   *arg;
+        int64_t exp;
+    } sel_item_t;
+    typedef basic_dlink_node<sel_item_t> sel_item_node;
+
+    typedef struct select_expiration {
+        int       fd;
+        int64_t   expire;
+        int       event;
+    }  sel_expire_t;
+    typedef basic_dlink_node<sel_expire_t> sel_expire_node;;
 
     struct selector_epoll {
         int epfd;     ///< epoll fd
         int count;    ///< total fd registered in epoll
-        basic_array<selectitem_t>  items;   ///< registered items
-        basic_dlink_list<selectitem_t>   requests;   ///< request queue
-        basic_array<epoll_event>   events;   ///< receive the output events from epoll_wait
+        basic_array<sel_item_t>      items;    ///< registered items
+        basic_dlink_list<sel_item_t> requests; ///< request queue
+        basic_array<epoll_event>       events;   ///< receive the output events from epoll_wait
+        basic_dlink_list<sel_expire_t> timeouts; ///< timeout queue
     };
     typedef struct selector_epoll selector_t;
 
@@ -129,7 +138,7 @@ namespace net {
     bool selector_remove(selector_t * sel, int fd, error_t *err);
 
     /// request events.
-    bool selector_request(selector_t * sel, int fd, int events, int timeout, error_t *err);
+    bool selector_request(selector_t * sel, int fd, int events, int64_t expire, error_t *err);
 
     /// run the selector
     int  selector_run(selector_t *sel, error_t *err);
@@ -773,6 +782,7 @@ net::selector_t * net::selector_init(net::selector_t *sel, int options, error_t 
     array_alloc(&sel->items, c_init_list_size);
     array_alloc(&sel->events, c_init_list_size);
     dlinklist_init(&sel->requests);
+    dlinklist_init(&sel->timeouts);
 
     return sel;
 } // end net::selector_init
@@ -795,10 +805,16 @@ bool net::selector_destroy(net::selector_t *sel, net::error_t *err)
     }
     array_free(&sel->items);
     
-    basic_dlink_node<selectitem_t> * node = dlinklist_pop_front(&sel->requests);
+    sel_item_node * node = dlinklist_pop_front(&sel->requests);
     while ( node ) {
         free(node);
         node = dlinklist_pop_front(&sel->requests);
+    }
+
+    sel_expire_node * node1 = dlinklist_pop_front(&sel->timeouts);
+    while ( node1 ) {
+        free(node1);
+        node1 = dlinklist_pop_front(&sel->timeouts);
     }
 
     array_free(&sel->events);
@@ -810,9 +826,9 @@ bool net::selector_destroy(net::selector_t *sel, net::error_t *err)
 inline 
 bool net::selector_add(net::selector_t * sel, int fd, selector_event_calback cb, void *arg, error_t *err)
 {
-    select_item_node * node = (select_item_node *)malloc(sizeof(select_item_node));
+    sel_item_node * node = (sel_item_node *)malloc(sizeof(sel_item_node));
     node->value.fd = fd;
-    node->value.requests = select_add;
+    node->value.events = select_add;
     node->value.callback = cb;
     node->value.arg = arg;
     node->next = nullptr;
@@ -826,9 +842,9 @@ bool net::selector_add(net::selector_t * sel, int fd, selector_event_calback cb,
 inline 
 bool net::selector_remove(net::selector_t * sel, int fd, error_t *err) 
 {
-    select_item_node * node = (select_item_node *)malloc(sizeof(select_item_node));
+    sel_item_node * node = (sel_item_node *)malloc(sizeof(sel_item_node));
     node->value.fd = fd;
-    node->value.requests = select_remove;
+    node->value.events = select_remove;
     node->next = nullptr;
     node->prev = nullptr;
 
@@ -837,3 +853,18 @@ bool net::selector_remove(net::selector_t * sel, int fd, error_t *err)
     return true;
 }
 
+inline 
+bool net::selector_request(net::selector_epoll* sel, int fd, int events, int64_t expire, net::error_info*)
+{
+    sel_item_node * node = (sel_item_node *)malloc(sizeof(sel_item_node));
+    node->value.fd = fd;
+    node->value.events = events;
+    node->value.exp = expire;
+    node->value.callback = nullptr;
+    node->value.arg = nullptr;
+    node->next = nullptr;
+    node->prev = nullptr;
+    auto p = dlinklist_push_back(&sel->requests, node);
+    assert(p);
+    return true;
+}
