@@ -876,7 +876,7 @@ int  net::selector_run(net::selector_t *sel, net::error_t *err)
             item->fd = -1;
             
             // 检查timeout队列，删除对应的fd节点
-            sel_expire_node * tnode = alg::dlinklist_get_front(&sel->timeouts);
+            sel_expire_node * tnode = sel->timeouts.front;
             while ( tnode ) {
                 auto tnode2 = tnode->next;
                 if (tnode->value.fd == rnode->value.fd ) {
@@ -921,7 +921,7 @@ int  net::selector_run(net::selector_t *sel, net::error_t *err)
 
     // 获取超时事件
     int64_t now = net::now();
-    auto node = alg::dlinklist_get_front(&sel->timeouts);
+    auto node = sel->timeouts.front;
     if ( !node ) return 0;  return 0;  // no events to wait
     
     int timeout = (int)((node->value.expire - now) / 1000);
@@ -966,7 +966,7 @@ int  net::selector_run(net::selector_t *sel, net::error_t *err)
             }
 
             // 遍历timeout列表，剔除当前相关事件，这里遍历性能差点，后续优化
-            auto tnode = alg::dlinklist_get_front(&sel->timeouts);
+            auto tnode = sel->timeouts.front;
             while ( tnode ) {
                 auto tnode2 = tnode->next;
                 if ( tnode->value.fd == fd && tnode->value.events & e->events ) {
@@ -987,7 +987,7 @@ int  net::selector_run(net::selector_t *sel, net::error_t *err)
 
     now = net::now();
     // 清理timeout列表超时节点，这里遍历性能差点，后续优化
-    auto tnode = alg::dlinklist_get_front(&sel->timeouts);
+    auto tnode = sel->timeouts.front;
     while ( tnode ) {
         auto tnode2 = tnode->next;
         if ( tnode->value.expire < now ) {

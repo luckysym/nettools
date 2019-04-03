@@ -48,9 +48,6 @@ namespace alg {
     template<class T>
     basic_dlink_node<T> * dlinklist_pop_front(basic_dlink_list<T> * lst);
 
-    template<class T>
-    basic_dlink_node<T> * dlinklist_get_front(basic_dlink_list<T> * lst);
-
 } // end namespace alg, for decl
 
 namespace alg 
@@ -89,8 +86,7 @@ basic_array<T> * array_realloc(alg::basic_array<T> * arr, size_t size)
 template<class T>
 basic_dlink_list<T> * dlinklist_init(basic_dlink_list<T> * lst)
 {
-    lst->front = (basic_dlink_node<T>*)lst;
-    lst->back  = (basic_dlink_node<T>*)lst;
+    lst->front = lst->back = nullptr;
     lst->size  = 0;
     return lst;
 }
@@ -106,10 +102,36 @@ basic_dlink_node<T> * dlinklist_remove(basic_dlink_list<T> * lst, basic_dlink_no
             if ( p0 ) p0->next = p1;
             if ( p1 ) p1->prev = p0;
             --lst->size;
+            if ( lst->size == 0 ) lst->front = lst->back = nullptr;
             break;
         }
         p = p->next;
     }
+    return node;
+}
+
+template<class T>
+basic_dlink_node<T> * dlinklist_push_back(basic_dlink_list<T> * lst, basic_dlink_node<T> *node)
+{
+    node->prev = lst->back;
+    node->next = nullptr;
+    if ( lst->back ) lst->back->next = node;
+    else lst->back = lst->front = node;
+    ++lst->size;
+    return node;
+}
+
+template<class T>
+basic_dlink_node<T> * dlinklist_pop_front(basic_dlink_list<T> * lst)
+{
+    auto p = lst->front;
+    if ( p ) {
+        if ( p->next ) p->next->prev = nullptr;
+        p->next = nullptr;
+        --lst->size;
+        if ( lst->size == 0 ) lst->front = lst->back = nullptr;
+    }
+    return p;
 }
 
 
