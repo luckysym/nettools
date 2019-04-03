@@ -1,5 +1,7 @@
 #pragma once
 
+#include <sym/algorithm.h>
+
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/time.h>
@@ -47,51 +49,6 @@ namespace net {
         char * path;
     } location_t;
 
-    template<class T>
-    struct basic_array {
-        T * values;
-        int cap;
-        int size;
-    }; // end struct basic_array
-
-    template<class T>
-    basic_array<T> * array_alloc(basic_array<T> * arr, int cap);
-
-    template<class T>
-    basic_array<T> * array_resize(basic_array<T> * arr, int size);
-    
-    template<class T>
-    void array_free(basic_array<T> * arr);
-
-    template <class T>
-    struct basic_dlink_node {
-        T  value;
-        struct basic_dlink_node<T> *next;
-        struct basic_dlink_node<T> *prev;
-    }; // struct baskc_link_node
-
-    template<class T>
-    struct basic_dlink_list {
-        basic_dlink_node<T> * front;
-        basic_dlink_node<T> * back;
-    }; // end struct basic_dlink_list
-
-    template<class T>
-    basic_dlink_node<T> * dlinklist_push_back(basic_dlink_list<T> * lst, basic_dlink_node<T> *node); 
-
-    template<class T>
-    basic_dlink_node<T> * dlinklist_pop_front(basic_dlink_list<T> * lst);
-
-    template<class T>
-    basic_dlink_node<T> * dlinklist_get_front(basic_dlink_list<T> * lst);
-
-    template<class T>
-    basic_dlink_list<T> * dlinklist_init(basic_dlink_list<T> * lst);
-
-    template<class T>
-    basic_dlink_node<T> * dlinklist_remove(basic_dlink_list<T> * lst, basic_dlink_node<T> * node);
-
-
     const int select_none    = 0;
     const int select_read    = 1;
     const int select_write   = 2;
@@ -114,22 +71,27 @@ namespace net {
         void   *arg;
         int64_t exp;
     } sel_item_t;
-    typedef basic_dlink_node<sel_item_t> sel_item_node;
-
+    typedef alg::basic_dlink_node<sel_item_t> sel_item_node;
+    
     typedef struct select_expiration {
         int       fd;
         int64_t   expire;
         int       events;
     }  sel_expire_t;
-    typedef basic_dlink_node<sel_expire_t> sel_expire_node;;
+    typedef alg::basic_dlink_node<sel_expire_t> sel_expire_node;;
+
+    typedef alg::basic_array<epoll_event> epoll_event_array;
+    typedef alg::basic_array<sel_item_t>  sel_item_array;
+    typedef alg::basic_dlink_list<sel_item_t> sel_item_list;
+    typedef alg::basic_dlink_list<sel_expire_t> sel_expire_list;
 
     struct selector_epoll {
         int epfd;     ///< epoll fd
         int count;    ///< total fd registered in epoll
-        basic_array<sel_item_t>      items;    ///< registered items
-        basic_dlink_list<sel_item_t> requests; ///< request queue
-        basic_array<epoll_event>       events;   ///< receive the output events from epoll_wait
-        basic_dlink_list<sel_expire_t> timeouts; ///< timeout queue
+        epoll_event_array events; ///< receive the output events from epoll_wait
+        sel_item_array    items;    ///< registered items
+        sel_item_list     requests;        ///< request queue
+        sel_expire_list   timeouts; ///< timeout queue
     };
     typedef struct selector_epoll selector_t;
 
@@ -787,10 +749,10 @@ net::selector_t * net::selector_init(net::selector_t *sel, int options, error_t 
 
     sel->epfd = fd;
     sel->count = 0;
-    array_alloc(&sel->items, c_init_list_size);
-    array_alloc(&sel->events, c_init_list_size);
-    dlinklist_init(&sel->requests);
-    dlinklist_init(&sel->timeouts);
+    alg::array_alloc(&sel->items, c_init_list_size);
+    alg::array_alloc(&sel->events, c_init_list_size);
+    alg::dlinklist_init(&sel->requests);
+    alg::dlinklist_init(&sel->timeouts);
 
     return sel;
 } // end net::selector_init
@@ -811,7 +773,7 @@ bool net::selector_destroy(net::selector_t *sel, net::error_t *err)
         }
         sel->count = 0;
     }
-    array_free(&sel->items);
+    alg::array_free(&sel->items);
     
     sel_item_node * node = dlinklist_pop_front(&sel->requests);
     while ( node ) {
@@ -825,7 +787,7 @@ bool net::selector_destroy(net::selector_t *sel, net::error_t *err)
         node1 = dlinklist_pop_front(&sel->timeouts);
     }
 
-    array_free(&sel->events);
+    alg::array_free(&sel->events);
     close(sel->epfd);
     sel->epfd = -1;
     return true;
@@ -842,7 +804,7 @@ bool net::selector_add(net::selector_t * sel, int fd, selector_event_calback cb,
     node->next = nullptr;
     node->prev = nullptr;
 
-    auto p = dlinklist_push_back(&sel->requests, node);
+    auto p = alg::dlinklist_push_back(&sel->requests, node);
     assert(p == node);
     return true;
 }
@@ -856,7 +818,7 @@ bool net::selector_remove(net::selector_t * sel, int fd, error_t *err)
     node->next = nullptr;
     node->prev = nullptr;
 
-    auto p = dlinklist_push_back(&sel->requests, node);
+    auto p = alg::dlinklist_push_back(&sel->requests, node);
     assert(p);
     return true;
 }
@@ -872,7 +834,7 @@ bool net::selector_request(net::selector_epoll* sel, int fd, int events, int64_t
     node->value.arg = nullptr;
     node->next = nullptr;
     node->prev = nullptr;
-    auto p = dlinklist_push_back(&sel->requests, node);
+    auto p = alg::dlinklist_push_back(&sel->requests, node);
     assert(p);
     return true;
 }
@@ -887,7 +849,7 @@ int  net::selector_run(net::selector_t *sel, net::error_t *err)
         if ( rnode->value.events == select_add ) {
             // 注册指定的fd
             if ( rnode->value.fd >= sel->items.size ) {
-                auto * arr = array_resize(&sel->items, rnode->value.fd + 1);
+                auto * arr = alg::array_realloc(&sel->items, rnode->value.fd + 1);
                 arr->values[rnode->value.fd].fd = -1;
             }
             assert(sel->items.values[rnode->value.fd].fd == -1);
@@ -904,7 +866,7 @@ int  net::selector_run(net::selector_t *sel, net::error_t *err)
             item->callback = rnode->value.callback;
             item->arg = rnode->value.arg;
             sel->count += 1;
-            array_resize(&sel->events, sel->count);
+            alg::array_realloc(&sel->events, sel->count);
         } else if ( rnode->value.events == select_remove) {
             // 注销指定的fd
             int r1 = epoll_ctl(sel->epfd, EPOLL_CTL_ADD, rnode->value.fd, nullptr);
@@ -914,11 +876,11 @@ int  net::selector_run(net::selector_t *sel, net::error_t *err)
             item->fd = -1;
             
             // 检查timeout队列，删除对应的fd节点
-            sel_expire_node * tnode = dlinklist_get_front(&sel->timeouts);
+            sel_expire_node * tnode = alg::dlinklist_get_front(&sel->timeouts);
             while ( tnode ) {
                 auto tnode2 = tnode->next;
                 if (tnode->value.fd == rnode->value.fd ) {
-                    dlinklist_remove(&sel->timeouts, tnode);
+                    alg::dlinklist_remove(&sel->timeouts, tnode);
                     free(tnode);
                 }
                 tnode = tnode2;
@@ -949,7 +911,7 @@ int  net::selector_run(net::selector_t *sel, net::error_t *err)
                 expnode->value.events = delta_events;
                 expnode->next = nullptr;
                 expnode->prev = nullptr;
-                auto *pe = dlinklist_push_back(&sel->timeouts, expnode);
+                auto *pe = alg::dlinklist_push_back(&sel->timeouts, expnode);
                 assert(pe == expnode);
             }
         }
@@ -959,7 +921,7 @@ int  net::selector_run(net::selector_t *sel, net::error_t *err)
 
     // 获取超时事件
     int64_t now = net::now();
-    auto node = dlinklist_get_front(&sel->timeouts);
+    auto node = alg::dlinklist_get_front(&sel->timeouts);
     if ( !node ) return 0;  return 0;  // no events to wait
     
     int timeout = (int)((node->value.expire - now) / 1000);
@@ -1004,13 +966,13 @@ int  net::selector_run(net::selector_t *sel, net::error_t *err)
             }
 
             // 遍历timeout列表，剔除当前相关事件，这里遍历性能差点，后续优化
-            auto tnode = dlinklist_get_front(&sel->timeouts);
+            auto tnode = alg::dlinklist_get_front(&sel->timeouts);
             while ( tnode ) {
                 auto tnode2 = tnode->next;
                 if ( tnode->value.fd == fd && tnode->value.events & e->events ) {
                     tnode->value.events &= (~e->events); // 取消请求的epoll事件，如果所有事件都取消了，就删除该节点
                     if ( tnode->value.events == 0 ) {
-                        dlinklist_remove(&sel->timeouts, tnode);
+                        alg::dlinklist_remove(&sel->timeouts, tnode);
                         free(tnode);
                     }
                     break;
@@ -1025,7 +987,7 @@ int  net::selector_run(net::selector_t *sel, net::error_t *err)
 
     now = net::now();
     // 清理timeout列表超时节点，这里遍历性能差点，后续优化
-    auto tnode = dlinklist_get_front(&sel->timeouts);
+    auto tnode = alg::dlinklist_get_front(&sel->timeouts);
     while ( tnode ) {
         auto tnode2 = tnode->next;
         if ( tnode->value.expire < now ) {
@@ -1036,7 +998,7 @@ int  net::selector_run(net::selector_t *sel, net::error_t *err)
             if ( tnode->value.events & EPOLLIN  ) item->events &= (~(select_read | select_accept) );
             if ( tnode->value.events & EPOLLOUT ) item->events &= (~(select_write | select_connect) );
             if ( item->events & select_timeout )  item->events &= (~select_timeout);  // 如果请求的就是timeout，目的达到了
-            dlinklist_remove(&sel->timeouts, tnode);
+            alg::dlinklist_remove(&sel->timeouts, tnode);
             free(tnode);
         }
         tnode = tnode2;
