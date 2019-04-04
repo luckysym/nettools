@@ -130,20 +130,31 @@ namespace net {
     const int select_remove  = 16;
     const int select_timeout = 32;
     const int select_error   = 64;
+    const int select_persist = 128;
 
     const int c_init_list_size = 128;  ///< 列表初始化大小
 
-    const int selopt_thread_safe = 1;
+    const int selopt_thread_safe = 1;  ///< selector support multi-thread
 
     /// selector event callback function type
     typedef void (*selector_event_calback)(int fd, int event, void *arg);
+
+    /// 事件超时设置节点
+    typedef struct select_expiration {
+        int       fd;
+        int       events;
+        int64_t   exp;
+        int       inque;
+    }  sel_expire_t;
+    typedef alg::basic_dlink_node<sel_expire_t> sel_expire_node;
 
     typedef struct select_item {
         int fd;
         int events;    ///< requested select events, combination of select_*
         selector_event_calback  callback;
         void   *arg;
-        int64_t exp;
+        sel_expire_node rdexp;
+        sel_expire_node wrexp; 
     } sel_item_t;
     typedef alg::basic_dlink_node<sel_item_t> sel_item_node;
 
@@ -155,13 +166,6 @@ namespace net {
         void   *arg;
     } sel_oper_t;
     typedef alg::basic_dlink_node<sel_oper_t> sel_oper_node;
-    
-    typedef struct select_expiration {
-        int       fd;
-        int64_t   expire;
-        int       events;
-    }  sel_expire_t;
-    typedef alg::basic_dlink_node<sel_expire_t> sel_expire_node;;
 
     typedef alg::basic_array<epoll_event> epoll_event_array;
     typedef alg::basic_array<sel_item_t>  sel_item_array;
@@ -179,6 +183,7 @@ namespace net {
         sel_item_array    items;    ///< registered items
         
         sel_expire_list   timeouts; ///< timeout queue
+        sel_expire_list   persists; ///< persist event list
     };
     typedef struct selector_epoll selector_t;
 
@@ -946,6 +951,23 @@ int  net::selector_run(net::selector_t *sel, err::error_t *err)
             item->events = select_none;
             item->callback = rnode->value.callback;
             item->arg = rnode->value.arg;
+            
+            // 读超时节点初始化
+            item->rdexp.value.fd = rnode->value.fd;
+            item->rdexp.value.events = 0; 
+            item->rdexp.value.exp = 0;
+            item->rdexp.value.inque = 0;
+            item->rdexp.prev = nullptr;
+            item->rdexp.next = nullptr;
+
+            // 写超时节点初始化
+            item->wrexp.value.fd = rnode->value.fd;
+            item->wrexp.value.events = 0; 
+            item->wrexp.value.exp = 0;
+            item->rdexp.value.inque = 0;
+            item->wrexp.prev = nullptr;
+            item->wrexp.next = nullptr;
+
             sel->count += 1;
             alg::array_realloc(&sel->events, sel->count);
         } else if ( rnode->value.opevents == select_remove) {
@@ -962,20 +984,20 @@ int  net::selector_run(net::selector_t *sel, err::error_t *err)
                 auto tnode2 = tnode->next;
                 if (tnode->value.fd == rnode->value.fd ) {
                     alg::dlinklist_remove(&sel->timeouts, tnode);
-                    free(tnode);
                 }
                 tnode = tnode2;
             }
-
         } else {
             // 设置其他读写事件
             sel_item_t * item = &sel->items.values[rnode->value.fd];
+
+            // 判断是否有新增的需要监听的事件
             int events = item->events | rnode->value.opevents;
             int delta_events = events ^ item->events;
             if ( delta_events ) {   // 经过两次位操作，delta_events里面仅剩新增的事件
-                
+            
                 struct epoll_event evt;
-                evt.events = 0;
+                evt.events  = 0;
                 evt.data.fd = item->fd;
                 if ( events & select_read || events & select_accept ) evt.events |= EPOLLIN;
                 if ( events & select_write || events & select_connect ) evt.events |= EPOLLOUT;
@@ -984,28 +1006,50 @@ int  net::selector_run(net::selector_t *sel, err::error_t *err)
                 int r = epoll_ctl(sel->epfd, EPOLL_CTL_MOD, item->fd, &evt);
                 assert( r == 0);
                 item->events = events;  // 全量事件设置到item
-
-                // 写入timeout列表
-                sel_expire_node * expnode = (sel_expire_node *)malloc(sizeof(sel_expire_node));
-                expnode->value.fd = item->fd;
-                expnode->value.expire = rnode->value.expire;
-                expnode->value.events = delta_events;
-                expnode->next = nullptr;
-                expnode->prev = nullptr;
-                auto *pe = alg::dlinklist_push_back(&sel->timeouts, expnode);
-                assert(pe == expnode);
+                
+                if ( 0 == (delta_events & select_persist) ) {
+                    // 非持久事件
+                    if ( delta_events & select_read || delta_events & select_accept ) {
+                        item->rdexp.value.exp = rnode->value.expire;
+                        assert( item->rdexp.value.inque == 0 );
+                        alg::dlinklist_push_back(&sel->timeouts, &item->rdexp);
+                        item->rdexp.value.inque = 1;   // 在timeout queue
+                    }
+                    if ( delta_events & select_write || delta_events & select_connect ) {
+                        item->wrexp.value.exp = rnode->value.expire;
+                        assert( item->wrexp.value.inque == 0 );
+                        alg::dlinklist_push_back(&sel->timeouts, &item->wrexp);
+                        item->wrexp.value.inque = 1;   // 在timeout queue
+                    }
+                } else {
+                    // 持久事件
+                    if ( delta_events & select_read || delta_events & select_accept ) {
+                        item->rdexp.value.exp = rnode->value.expire;
+                        item->rdexp.value.events = delta_events & (select_read | select_accept | select_persist);
+                        assert( item->rdexp.value.inque == 0 );
+                        alg::dlinklist_push_back(&sel->persists, &item->rdexp);
+                        item->rdexp.value.inque = 2;   // 在persist queue
+                    }
+                    if ( delta_events & select_write || delta_events & select_connect ) {
+                        item->wrexp.value.exp = rnode->value.expire;
+                        item->wrexp.value.events = delta_events & (select_write | select_connect | select_persist);
+                        assert( item->wrexp.value.inque == 0 );
+                        alg::dlinklist_push_back(&sel->persists, &item->wrexp);
+                        item->wrexp.value.inque = 2;   // 在persist queue
+                    }
+                }
             }
         }
         free(rnode);
     }
 
-
     // 获取超时事件
-    int64_t now = net::now();
     auto node = sel->timeouts.front;
-    if ( !node ) return 0;  return 0;  // no events to wait
+    if ( !node ) node = sel->persists.front;
+    if ( !node ) return 0;  // no any event need wait
     
-    int timeout = (int)((node->value.expire - now) / 1000);
+    int64_t now = net::now();
+    int timeout = (int)((node->value.exp - now) / 1000);
     if ( timeout < 0 )  timeout = 0;  // check event without timeout if first node already timeout
 
     // epoll wait
@@ -1050,13 +1094,16 @@ int  net::selector_run(net::selector_t *sel, err::error_t *err)
             auto tnode = sel->timeouts.front;
             while ( tnode ) {
                 auto tnode2 = tnode->next;
-                if ( tnode->value.fd == fd && tnode->value.events & e->events ) {
-                    tnode->value.events &= (~e->events); // 取消请求的epoll事件，如果所有事件都取消了，就删除该节点
-                    if ( tnode->value.events == 0 ) {
+                assert(tnode->value.inque == 1);
+                if ( tnode->value.fd == e->data.fd ) {
+                    int se = 0;
+                    if ( e->events & EPOLLIN ) se = select_read | select_accept;
+                    if ( e->events & EPOLLOUT) se = select_write | select_connect;
+                    if ( tnode->value.events & se ) {
+                        tnode->value.events &= ( ~se ); // 取消请求的epoll事件，如果所有事件都取消了，就删除该节点
                         alg::dlinklist_remove(&sel->timeouts, tnode);
-                        free(tnode);
+                        break;
                     }
-                    break;
                 }
                 tnode = tnode2;
             }
@@ -1071,16 +1118,19 @@ int  net::selector_run(net::selector_t *sel, err::error_t *err)
     auto tnode = sel->timeouts.front;
     while ( tnode ) {
         auto tnode2 = tnode->next;
-        if ( tnode->value.expire < now ) {
+        if ( tnode->value.exp < now ) {
             int fd = tnode->value.fd;
             assert( fd < sel->items.size );
             sel_item_t *item = sel->items.values + fd;
             item->callback(fd, select_timeout, item->arg);
-            if ( tnode->value.events & EPOLLIN  ) item->events &= (~(select_read | select_accept) );
-            if ( tnode->value.events & EPOLLOUT ) item->events &= (~(select_write | select_connect) );
-            if ( item->events & select_timeout )  item->events &= (~select_timeout);  // 如果请求的就是timeout，目的达到了
+            
+            // timeouts队列里必然都是非持久事件，从timeout表里清除
+            assert(tnode->value.inque == 1);
+            item->events &= (~tnode->value.events);
             alg::dlinklist_remove(&sel->timeouts, tnode);
-            free(tnode);
+            tnode->next = nullptr;
+            tnode->prev = nullptr;
+            tnode->value.inque = 0;
         }
         tnode = tnode2;
     }
