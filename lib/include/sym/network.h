@@ -150,7 +150,7 @@ namespace net {
 
     typedef struct select_item {
         int fd;
-        int events;    ///< requested select events, combination of select_*
+        int epevents;    ///< current requested epoll events
         selector_event_calback  callback;
         void   *arg;
         sel_expire_node rdexp;
@@ -948,7 +948,6 @@ int  net::selector_run(net::selector_t *sel, err::error_t *err)
             
             sel_item_t * item = &sel->items.values[rnode->value.fd];
             item->fd = rnode->value.fd;
-            item->events = select_none;
             item->callback = rnode->value.callback;
             item->arg = rnode->value.arg;
             
@@ -992,10 +991,10 @@ int  net::selector_run(net::selector_t *sel, err::error_t *err)
             sel_item_t * item = &sel->items.values[rnode->value.fd];
 
             // 判断是否有新增的需要监听的事件
-            int events = item->events | rnode->value.opevents;
-            int delta_events = events ^ item->events;
+            int current_events = item->rdexp.value.events | item->wrexp.value.events;
+            int events = current_events | rnode->value.opevents;
+            int delta_events = events ^ current_events;
             if ( delta_events ) {   // 经过两次位操作，delta_events里面仅剩新增的事件
-            
                 struct epoll_event evt;
                 evt.events  = 0;
                 evt.data.fd = item->fd;
@@ -1005,17 +1004,19 @@ int  net::selector_run(net::selector_t *sel, err::error_t *err)
                 // 修改epoll
                 int r = epoll_ctl(sel->epfd, EPOLL_CTL_MOD, item->fd, &evt);
                 assert( r == 0);
-                item->events = events;  // 全量事件设置到item
+                item->epevents = evt.events;
                 
                 if ( 0 == (delta_events & select_persist) ) {
                     // 非持久事件
                     if ( delta_events & select_read || delta_events & select_accept ) {
+                        item->rdexp.value.events |= ( delta_events & (select_read |select_accept) ) ;
                         item->rdexp.value.exp = rnode->value.expire;
                         assert( item->rdexp.value.inque == 0 );
                         alg::dlinklist_push_back(&sel->timeouts, &item->rdexp);
                         item->rdexp.value.inque = 1;   // 在timeout queue
                     }
                     if ( delta_events & select_write || delta_events & select_connect ) {
+                        item->wrexp.value.events |= ( delta_events & (select_write |select_connect) ) ;
                         item->wrexp.value.exp = rnode->value.expire;
                         assert( item->wrexp.value.inque == 0 );
                         alg::dlinklist_push_back(&sel->timeouts, &item->wrexp);
@@ -1062,29 +1063,33 @@ int  net::selector_run(net::selector_t *sel, err::error_t *err)
             sel_item_t *item = sel->items.values + fd;
             
             if ( e->events & EPOLLIN ) {
-                if ( item->events & select_read ) {
+                if ( item->rdexp.value.events & select_read ) {
                     item->callback(fd, select_read, item->arg);
-                    item->events &= (~select_read);  // 事件完成，取消
-                } else if ( item->events & select_accept ) {
+                } else if ( item->rdexp.value.events & select_accept ) {
                     item->callback(fd, select_accept, item->arg);
-                    item->events &= (~select_accept);  // 事件完成，取消
                 } else {
                     // 没有请求EPOLLIN事件，怎么会有呢？
                     assert( "EPOLLIN event not requested" == nullptr );
                 }
-            } 
+                // 非持久事件，取消该标记
+                if ( 0 == (item->rdexp.value.events & select_persist) ) {
+                    item->rdexp.value.events &= ~(select_read|select_accept);
+                }
+            }
             if ( e->events & EPOLLOUT ) {
-                if ( item->events & select_write ) {
+                if ( item->wrexp.value.events & select_write ) {
                     item->callback(fd, select_write, item->arg);
-                    item->events &= (~select_write);  // 事件完成，取消
-                } else if ( item->events & select_connect ) {
+                } else if ( item->wrexp.value.events & select_connect ) {
                     item->callback(fd, select_connect, item->arg);
-                    item->events &= (~select_connect);  // 事件完成，取消
                 } else {
                     // 没有请求EPOLLIN事件，怎么会有呢？
                     assert( "EPOLLOUT event not requested" == nullptr );
                 }
-            } 
+                // 非持久事件，取消该标记
+                if ( 0 == (item->wrexp.value.events & select_persist) ) {
+                    item->wrexp.value.events &= ~(select_write|select_connect);
+                }
+            }
             // wait错误
             if ( e->events & EPOLLERR ) {
                 item->callback(fd, select_error, item->arg);
@@ -1126,7 +1131,7 @@ int  net::selector_run(net::selector_t *sel, err::error_t *err)
             
             // timeouts队列里必然都是非持久事件，从timeout表里清除
             assert(tnode->value.inque == 1);
-            item->events &= (~tnode->value.events);
+            tnode->value.events = select_none;
             alg::dlinklist_remove(&sel->timeouts, tnode);
             tnode->next = nullptr;
             tnode->prev = nullptr;
