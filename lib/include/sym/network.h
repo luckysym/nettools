@@ -23,6 +23,82 @@
 #define UNIX_PATH_MAX 108
 #endif
 
+#include <pthread.h>
+
+namespace err {
+    typedef struct error_info {
+        char * str;
+        struct error_info * next;
+    } error_t;
+
+    /// init the error info
+    void init_error_info(error_t * err);
+
+    /// free error info members
+    void free_error_info(error_t * err);
+
+    /// push error info to the error object
+    void push_error_info(error_t * err, int size, const char * format, ...);
+
+} // end namespace sl
+
+inline 
+void err::init_error_info(err::error_info * err)
+{
+    err->str = nullptr;
+    err->next = nullptr;
+}
+
+inline 
+void err::free_error_info(err::error_info * err)
+{
+    error_t * p = err->next;
+    while ( p ) {
+        error_t * p1 = p->next;
+        if ( p->str ) {
+            free(p->str);
+            p->str = nullptr;
+        }
+        p->next = nullptr;
+        free(p);
+        p = p1;
+    }
+
+    if ( err->str ) {
+        free((void *)err->str);
+        err->str = nullptr;
+    }
+    err->next = nullptr;
+}
+
+inline 
+void err::push_error_info(err::error_info * err, int size, const char *format, ...) {
+    if( err->str ) {
+        err->next = (error_t*)malloc(sizeof(error_t));
+        err->next->str = err->str;
+    }
+
+    err->str = (char*)malloc(size);
+    va_list ap;
+    va_start(ap, format);
+    vsnprintf(err->str, size, format, ap);
+    va_end(ap);
+}
+
+
+/// namespace for multi-thread 
+namespace mt {
+    typedef pthread_mutex_t mutex_t;
+
+    bool mutex_init(mutex_t *m, err::error_t * err);
+
+    bool mutex_free(mutex_t *m, err::error_t * err);
+
+    bool mutex_lock(mutex_t * m, err::error_t * err);
+
+    bool mutex_unlock(mutex_t * m, err::error_t * err);
+} // end namespace mt
+
 namespace net {
     
     // socket options bit flags
@@ -30,11 +106,7 @@ namespace net {
     const int sockopt_linger      = 2;
     const int sockopt_reuseaddr   = 4;
     const int sockopt_tcp_nodelay = 8;
-    
-    typedef struct error_info {
-        char * str;
-        struct error_info * next;
-    } error_t;
+
 
     typedef struct socket_attrib {
         int af;
@@ -60,6 +132,8 @@ namespace net {
     const int select_error   = 64;
 
     const int c_init_list_size = 128;  ///< 列表初始化大小
+
+    const int selopt_thread_safe = 1;
 
     /// selector event callback function type
     typedef void (*selector_event_calback)(int fd, int event, void *arg);
@@ -97,30 +171,34 @@ namespace net {
     struct selector_epoll {
         int epfd;     ///< epoll fd
         int count;    ///< total fd registered in epoll
+        
+        mt::mutex_t      *reqlock;   ///< lock for request operation list(requests) accessing
+        sel_oper_list     requests;  ///< request operation queue
+
         epoll_event_array events; ///< receive the output events from epoll_wait
         sel_item_array    items;    ///< registered items
-        sel_oper_list     requests;        ///< request operation queue
+        
         sel_expire_list   timeouts; ///< timeout queue
     };
     typedef struct selector_epoll selector_t;
 
     /// create and return a selector, returns null if failed
-    selector_t * selector_init(selector_t *sel, int options, error_t *err);
+    selector_t * selector_init(selector_t *sel, int options, err::error_t *err);
 
     /// destroy the selector created by selector_create
-    bool selector_destroy(selector_t *sel, error_t *err);
+    bool selector_destroy(selector_t *sel, err::error_t *err);
 
     /// add a socket fd and its callback function to the selector.
-    bool selector_add(selector_t * sel, int fd, selector_event_calback cb, void *arg, error_t *err);
+    bool selector_add(selector_t * sel, int fd, selector_event_calback cb, void *arg, err::error_t *err);
 
     /// remove socket from selector
-    bool selector_remove(selector_t * sel, int fd, error_t *err);
+    bool selector_remove(selector_t * sel, int fd, err::error_t *err);
 
     /// request events.
-    bool selector_request(selector_t * sel, int fd, int events, int64_t expire, error_t *err);
+    bool selector_request(selector_t * sel, int fd, int events, int64_t expire, err::error_t *err);
 
     /// run the selector
-    int  selector_run(selector_t *sel, error_t *err);
+    int  selector_run(selector_t *sel, err::error_t *err);
 
     /// gets and returns current timestamp in microseconds from epoch-time 
     int64_t now();
@@ -140,15 +218,6 @@ namespace net {
     /// free location members
     void location_free(struct localtion * loc);
 
-    /// init the error info
-    void init_error_info(error_t * err);
-
-    /// free error info members
-    void free_error_info(error_t * err);
-
-    /// push error info to the error object
-    void push_error_info(error_t * err, int size, const char * format, ...);
-
     /// 根据协议名称设置socket属性参数
     /// \param attr out, 输出的socket参数。
     /// \param name in, 名称，如tcp, tcp6, udp, udp6, unix
@@ -156,40 +225,40 @@ namespace net {
     socket_attrib * sockattr_from_protocol(socket_attrib * attr, const char * name);
 
     /// 根据locaction设置socketaddr
-    socklen_t sockaddr_from_location(sockaddr *paddr, socklen_t len, const location *loc, error_t * err);
+    socklen_t sockaddr_from_location(sockaddr *paddr, socklen_t len, const location *loc, err::error_t * err);
 
     /// convert sockaddr to location, returns the localtion pointer if succeed, or null if error 
     location_t * sockaddr_to_location(location_t *loc, const sockaddr * addr, socklen_t len);
 
     /// send message to remote, and return if all data sent or error or timeout, 
     /// returns total bytes sent if succeeded, or return -1 if failed, or 0 if timeout .
-    int socket_sendn(int fd, const char *data, int len, int timeout, error_info * err);
+    int socket_sendn(int fd, const char *data, int len, int timeout, err::error_info * err);
 
     /// receive message from remote, returns total bytes received if data buffer is full, 
     /// or return -1 if failed, or 0 if timeout.
-    int socket_recvn(int fd, char *data, int len, int timeout, error_info *err);
+    int socket_recvn(int fd, char *data, int len, int timeout, err::error_info *err);
 
     /// send message to remote, returns the sent byte count, or -1 if failed
-    int socket_send(int fd, const char *data, int len, error_info * err);
+    int socket_send(int fd, const char *data, int len, err::error_info * err);
 
     /// receive message from remote, returns the recevied byte count, 
     /// or return -1 if any error occured, include remote resets the connection.
-    int socket_recv(int fd, char *data, int len, error_info *err);
+    int socket_recv(int fd, char *data, int len, err::error_info *err);
 
     /// create and open a remote socket channel to the remote location, and returns the socket fd.
     /// returns -1 if failed.
-    int socket_open_channel(const location *remote, int options, error_info * err);
+    int socket_open_channel(const location *remote, int options, err::error_info * err);
 
     /// open a local socket listener, return the socket fd or -1 if failed.
-    int socket_open_listener(const location *local, int options, error_info *err);
+    int socket_open_listener(const location *local, int options, err::error_info *err);
 
     /// accept a new channel socke from the serve socket fd, return the client socket fd or -1 if nothing accepted.
     /// if -1 returned, check the output error, if err->str is null, means no more channel could be accept,
     /// and if err->str is not null, means accept is error. 
-    int socket_accept(int sfd, location_t *remote, error_t *err);
+    int socket_accept(int sfd, location_t *remote, err::error_t *err);
 
     /// close socket fd. returns true if success. 
-    bool socket_close(int fd, struct error_info *err);
+    bool socket_close(int fd, struct err::error_info *err);
 } // end namespace net 
 
 inline
@@ -279,70 +348,27 @@ net::location * net::location_from_url(struct net::location * loc, const char * 
 }
 
 inline 
-void net::init_error_info(net::error_info * err)
-{
-    err->str = nullptr;
-    err->next = nullptr;
-}
-
-inline 
-void net::free_error_info(net::error_info * err)
-{
-    error_t * p = err->next;
-    while ( p ) {
-        error_t * p1 = p->next;
-        if ( p->str ) {
-            free(p->str);
-            p->str = nullptr;
-        }
-        p->next = nullptr;
-        free(p);
-        p = p1;
-    }
-
-    if ( err->str ) {
-        free((void *)err->str);
-        err->str = nullptr;
-    }
-    err->next = nullptr;
-}
-
-inline 
-void net::push_error_info(net::error_info * err, int size, const char *format, ...) {
-    if( err->str ) {
-        err->next = (error_t*)malloc(sizeof(error_t));
-        err->next->str = err->str;
-    }
-
-    err->str = (char*)malloc(size);
-    va_list ap;
-    va_start(ap, format);
-    vsnprintf(err->str, size, format, ap);
-    va_end(ap);
-}
-
-inline 
-int net::socket_open_channel(const net::location * loc, int options, net::error_info * err)
+int net::socket_open_channel(const net::location * loc, int options, err::error_info * err)
 {
     // init socket attributes
     sockattr_t attr;
     sockattr_t * p = sockattr_from_protocol(&attr, loc->proto);
     if ( !p ) {
-        if ( err ) net::push_error_info(err, 128, "bad socket protocol name: %s", loc->proto);
+        if ( err ) err::push_error_info(err, 128, "bad socket protocol name: %s", loc->proto);
         return -1;
     }
 
     // init socket address
     char addrbuf[128];
     sockaddr *paddr = (sockaddr*)addrbuf;
-    error_t e2;
+    err::error_t e2;
     socklen_t addrlen = sockaddr_from_location((sockaddr*)addrbuf, 128, loc, &e2);
     if ( addrlen == 0 ) {
         if ( err ) {
-            net::push_error_info(err, 128, "bad socket location addr: %s/%s/%d/%s", 
+            err::push_error_info(err, 128, "bad socket location addr: %s/%s/%d/%s", 
                 loc->proto, loc->host?loc->host:"<none>", loc->port, loc->path?loc->path:"<none>");
         }
-        free_error_info(&e2);
+        err::free_error_info(&e2);
         return -1;
         
     }
@@ -352,7 +378,7 @@ int net::socket_open_channel(const net::location * loc, int options, net::error_
     int fd = ::socket(attr.af, attr.type | nonblock | SOCK_CLOEXEC, attr.proto);
     if ( fd == -1 ) {
         if ( err ) {
-            net::push_error_info(err, 128, "failed to create socket, %d, %s", errno, strerror(errno));
+            err::push_error_info(err, 128, "failed to create socket, %d, %s", errno, strerror(errno));
         }
         return -1;
     }
@@ -363,7 +389,7 @@ int net::socket_open_channel(const net::location * loc, int options, net::error_
         int r = setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &opt, sizeof(opt));
         if ( r == -1 ) {
             if ( err ) {
-                net::push_error_info(
+                err::push_error_info(
                     err, 128, "setsockopt tcp_nodelay error, fd=%d, err=%d, %s", 
                     fd, errno, strerror(errno));
             }
@@ -378,7 +404,7 @@ int net::socket_open_channel(const net::location * loc, int options, net::error_
         int r = setsockopt(fd, SOL_SOCKET, SO_LINGER, &lg, sizeof(lg));
         if ( r == -1 ) {
             if ( err ) {
-                net::push_error_info(err, 128, "setsockopt tcp_nodelay error, fd=%d, err=%d, %s", 
+                err::push_error_info(err, 128, "setsockopt tcp_nodelay error, fd=%d, err=%d, %s", 
                     fd, errno, strerror(errno));
             }
             close(fd);
@@ -390,7 +416,7 @@ int net::socket_open_channel(const net::location * loc, int options, net::error_
     int r = connect(fd, paddr, addrlen);
     if ( r == -1 && errno != EINPROGRESS ) {
         if ( err ) {
-            net::push_error_info(err, 128, "connect error, fd=%d, err=%d, %s", 
+            err::push_error_info(err, 128, "connect error, fd=%d, err=%d, %s", 
                 fd, errno, strerror(errno));
         }
         close(fd);
@@ -401,7 +427,7 @@ int net::socket_open_channel(const net::location * loc, int options, net::error_
 } // end net::socket_open_channel
 
 inline 
-int net::socket_recvn(int fd, char *data, int len, int timeout, net::error_info * err)
+int net::socket_recvn(int fd, char *data, int len, int timeout, err::error_info * err)
 {
     struct pollfd pfd;
     pfd.fd = fd;
@@ -418,20 +444,20 @@ int net::socket_recvn(int fd, char *data, int len, int timeout, net::error_info 
                 if ( n >= 0) {
                     pos += n;
                 } else {
-                    if ( err ) net::push_error_info(err, 128, "failed to receive data"); 
+                    if ( err ) err::push_error_info(err, 128, "failed to receive data"); 
                     return -1;
                 }
                 if ( pos == len ) return len;
             } else {
-                if ( err ) net::push_error_info(err, 128, "readable event wait failed");
+                if ( err ) err::push_error_info(err, 128, "readable event wait failed");
                 return -1;
             }
         } else if ( r == 0 ) {
-            if ( err ) net::push_error_info(err, 128, "readn timeout");
+            if ( err ) err::push_error_info(err, 128, "readn timeout");
             break;  // timeout
         } else {
             if ( errno != EINTR ) {
-                if ( err ) net::push_error_info(err, 128, "wait failed, %s", strerror(errno));
+                if ( err ) err::push_error_info(err, 128, "wait failed, %s", strerror(errno));
                 return -1;  // failed
             }
         }
@@ -446,7 +472,7 @@ int net::socket_recvn(int fd, char *data, int len, int timeout, net::error_info 
 }
 
 inline 
-int net::socket_sendn(int fd, const char *data, int len, int timeout, net::error_info * err)
+int net::socket_sendn(int fd, const char *data, int len, int timeout, err::error_info * err)
 {
     struct pollfd pfd;
     pfd.fd = fd;
@@ -463,12 +489,12 @@ int net::socket_sendn(int fd, const char *data, int len, int timeout, net::error
                 if ( n >= 0) {
                     pos += n;
                 } else {
-                    if ( err ) net::push_error_info(err, 128, "failed to send data, err %d, %s", errno, strerror(errno));
+                    if ( err ) err::push_error_info(err, 128, "failed to send data, err %d, %s", errno, strerror(errno));
                     return -1;
                 }
                 if ( pos == len ) return len;
             } else {
-                if ( err ) net::push_error_info(err, 128, "writable event wait failed");
+                if ( err ) err::push_error_info(err, 128, "writable event wait failed");
                 return -1;
             }
         } else if ( r == 0 ) {
@@ -476,7 +502,7 @@ int net::socket_sendn(int fd, const char *data, int len, int timeout, net::error
         } else {
             if ( errno != EINTR ) {
                 if ( err) {
-                    net::push_error_info(err, 128, "wait failed, %s", strerror(errno));
+                    err::push_error_info(err, 128, "wait failed, %s", strerror(errno));
                 }
                 return -1;  // failed
             }
@@ -492,12 +518,12 @@ int net::socket_sendn(int fd, const char *data, int len, int timeout, net::error
 }
 
 inline 
-bool net::socket_close( int fd, struct net::error_info * err) 
+bool net::socket_close( int fd, struct err::error_info * err) 
 {
     int r = ::close(fd);
     if ( r == 0 ) return true;
     
-    if ( err ) net::push_error_info(err, 128, "close fd failed, fd:%d, %s", fd, strerror(errno)); 
+    if ( err ) err::push_error_info(err, 128, "close fd failed, fd:%d, %s", fd, strerror(errno)); 
     return false;
 }
 
@@ -540,14 +566,14 @@ net::location_t * net::sockaddr_to_location(net::location_t *loc, const sockaddr
 }
 
 inline
-socklen_t net::sockaddr_from_location(sockaddr *paddr, socklen_t len, const location *loc, error_t * err)
+socklen_t net::sockaddr_from_location(sockaddr *paddr, socklen_t len, const location *loc, err::error_t * err)
 {
     // 根据protocol获取af
     sockattr_t attr;
     sockattr_t * p = sockattr_from_protocol(&attr, loc->proto);
     if ( !p ) {
         if ( err ) {
-            net::push_error_info(err, 128, "bad location protocol, %s", loc->proto);
+            err::push_error_info(err, 128, "bad location protocol, %s", loc->proto);
         }
         return 0;
     }
@@ -557,7 +583,7 @@ socklen_t net::sockaddr_from_location(sockaddr *paddr, socklen_t len, const loca
         sockaddr_un * unaddr = (sockaddr_un*)paddr;
         if ( loc->path && strlen(loc->path) >= UNIX_PATH_MAX) {
             if ( err ) {
-                net::push_error_info(err, 256, "unix path is too long, %s", loc->path);
+                err::push_error_info(err, 256, "unix path is too long, %s", loc->path);
             }
             return 0;
         }
@@ -575,7 +601,7 @@ socklen_t net::sockaddr_from_location(sockaddr *paddr, socklen_t len, const loca
         int r = ::getaddrinfo(loc->host, nullptr, &hints, &res);
         if ( r != 0 ) {
             if ( err ) {
-                net::push_error_info(err, 128, "getaddrinfo error, %s, %s", loc->host, gai_strerror(r));
+                err::push_error_info(err, 128, "getaddrinfo error, %s, %s", loc->host, gai_strerror(r));
             }
             return 0;
         }
@@ -616,27 +642,27 @@ net::socket_attrib * net::sockattr_from_protocol(net::socket_attrib * attr, cons
 }
 
 inline
-int net::socket_open_listener(const net::location *local, int options, net::error_info *err)
+int net::socket_open_listener(const net::location *local, int options, err::error_info *err)
 {
     // init socket attributes
     sockattr_t attr;
     sockattr_t * p = sockattr_from_protocol(&attr, local->proto);
     if ( !p ) {
-        if ( err ) net::push_error_info(err, 128, "bad socket protocol name: %s", local->proto);
+        if ( err ) err::push_error_info(err, 128, "bad socket protocol name: %s", local->proto);
         return -1;
     }
 
     // init socket address
     char addrbuf[128];
     sockaddr *paddr = (sockaddr*)addrbuf;
-    error_t e2;
+    err::error_t e2;
     socklen_t addrlen = sockaddr_from_location((sockaddr*)addrbuf, 128, local, &e2);
     if ( addrlen == 0 ) {
         if ( err ) {
-            net::push_error_info(err, 128, "bad socket location addr: %s/%s/%d/%s", 
+            err::push_error_info(err, 128, "bad socket location addr: %s/%s/%d/%s", 
                 local->proto, local->host?local->host:"<none>", local->port, local->path?local->path:"<none>");
         }
-        free_error_info(&e2);
+        err::free_error_info(&e2);
         return -1;
         
     }
@@ -646,7 +672,7 @@ int net::socket_open_listener(const net::location *local, int options, net::erro
     int fd = ::socket(attr.af, attr.type | nonblock | SOCK_CLOEXEC, attr.proto);
     if ( fd == -1 ) {
         if ( err ) {
-            net::push_error_info(err, 128, "failed to create socket, %d, %s", errno, strerror(errno));
+            err::push_error_info(err, 128, "failed to create socket, %d, %s", errno, strerror(errno));
         }
         return -1;
     }
@@ -657,7 +683,7 @@ int net::socket_open_listener(const net::location *local, int options, net::erro
         int r = setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &opt, sizeof(opt));
         if ( r == -1 ) {
             if ( err ) {
-                net::push_error_info(
+                err::push_error_info(
                     err, 128, "setsockopt tcp_nodelay error, fd=%d, err=%d, %s", 
                     fd, errno, strerror(errno));
             }
@@ -670,7 +696,7 @@ int net::socket_open_listener(const net::location *local, int options, net::erro
     int r = ::bind(fd, paddr, addrlen);
     if ( r == -1 ) {
         if ( err ) {
-            net::push_error_info(err, 128, "bind socket error, fd: %d, %s", fd, strerror(errno));
+            err::push_error_info(err, 128, "bind socket error, fd: %d, %s", fd, strerror(errno));
         }
         close(fd);
         return -1;
@@ -680,7 +706,7 @@ int net::socket_open_listener(const net::location *local, int options, net::erro
     r = ::listen(fd, SOMAXCONN);
     if ( r == -1 ) {
         if ( err ) {
-            net::push_error_info(err, 128, "bind socket error, fd: %d, %s", fd, strerror(errno));
+            err::push_error_info(err, 128, "bind socket error, fd: %d, %s", fd, strerror(errno));
         }
         close(fd);
         return -1;
@@ -690,7 +716,7 @@ int net::socket_open_listener(const net::location *local, int options, net::erro
 } // end socket_open_listener
 
 inline 
-int net::socket_send(int fd, const char *data, int len, net::error_t *err)
+int net::socket_send(int fd, const char *data, int len, err::error_t *err)
 {
     int r = ::send(fd, data, len, 0);
     if ( r >= 0 ) return r;   // send ok
@@ -698,7 +724,7 @@ int net::socket_send(int fd, const char *data, int len, net::error_t *err)
         int e = errno;
         if ( e == EINTR || e == EAGAIN) return 0; // nothing send, try again
         else {
-            net::push_error_info(err, 128, "socket send error, fd: %d, err: %d, %s",
+            err::push_error_info(err, 128, "socket send error, fd: %d, err: %d, %s",
                 fd, e, strerror(e));
             return -1;  // send failed
         }
@@ -706,25 +732,25 @@ int net::socket_send(int fd, const char *data, int len, net::error_t *err)
 }
 
 inline 
-int net::socket_recv(int fd, char *data, int len, net::error_t *err)
+int net::socket_recv(int fd, char *data, int len, err::error_t *err)
 {
     int r = ::recv(fd, data, len, 0);
     if ( r > 0 ) return r;
     if ( r == 0 ) {
-        net::push_error_info(err, 128, "socket closed by remote, fd: %d", fd);
+        err::push_error_info(err, 128, "socket closed by remote, fd: %d", fd);
         return -1; 
     } else {
         int e = errno;
         if ( e == EINTR || e == EAGAIN) return 0; // nothing recv, try again
         else {
-            net::push_error_info(err, 128, "socket recv error, fd: %d, err: %d, %s",
+            err::push_error_info(err, 128, "socket recv error, fd: %d, err: %d, %s",
                 fd, e, strerror(e));
             return -1;  // recv failed
         }
     }
 }
 
-int net::socket_accept(int sfd, location_t *remote, error_t *err)
+int net::socket_accept(int sfd, location_t *remote, err::error_t *err)
 {
     char addrbuf[128];
     socklen_t addrlen = 128;
@@ -737,10 +763,10 @@ int net::socket_accept(int sfd, location_t *remote, error_t *err)
     } else {
         int e = errno;
         if ( e == EINTR || e == EAGAIN) {
-            net::free_error_info(err);
+            err::free_error_info(err);
             return -1; // nothing recv, try again
         } else {
-            net::push_error_info(err, 128, "socket accept error, fd: %d, err: %d, %s",
+            err::push_error_info(err, 128, "socket accept error, fd: %d, err: %d, %s",
                 sfd, e, strerror(e));
             return -1;  // recv failed
         }
@@ -748,11 +774,11 @@ int net::socket_accept(int sfd, location_t *remote, error_t *err)
 }
 
 inline 
-net::selector_t * net::selector_init(net::selector_t *sel, int options, error_t *err)
+net::selector_t * net::selector_init(net::selector_t *sel, int options, err::error_t *err)
 {
     int fd = epoll_create1(EPOLL_CLOEXEC);
     if ( fd == -1 ) {
-        net::push_error_info(err, 128, "epoll_create1 error, %d, %s", errno, strerror(errno));
+        err::push_error_info(err, 128, "epoll_create1 error, %d, %s", errno, strerror(errno));
         return nullptr;
     }
 
@@ -763,11 +789,20 @@ net::selector_t * net::selector_init(net::selector_t *sel, int options, error_t 
     alg::dlinklist_init(&sel->requests);
     alg::dlinklist_init(&sel->timeouts);
 
+    // 根据options设置判断是否需要对request队列创建访问锁
+    sel->reqlock = nullptr;
+    if ( options & selopt_thread_safe ) {
+        sel->reqlock = (mt::mutex_t*)malloc(sizeof(mt::mutex_t));
+        assert(sel->reqlock);
+        bool isok = mt::mutex_init(sel->reqlock, nullptr);
+        assert(isok);
+    }
+
     return sel;
 } // end net::selector_init
 
 inline 
-bool net::selector_destroy(net::selector_t *sel, net::error_t *err)
+bool net::selector_destroy(net::selector_t *sel, err::error_t *err)
 {
     if ( sel->count > 0 ) {
         for( int i = 0; i < sel->items.size; ++i ) {
@@ -799,11 +834,17 @@ bool net::selector_destroy(net::selector_t *sel, net::error_t *err)
     alg::array_free(&sel->events);
     close(sel->epfd);
     sel->epfd = -1;
+
+    if ( sel->reqlock ) {
+        mt::mutex_free(sel->reqlock, nullptr);
+        free( sel->reqlock);
+        sel->reqlock = nullptr;
+    }
     return true;
 } 
 
 inline 
-bool net::selector_add(net::selector_t * sel, int fd, selector_event_calback cb, void *arg, error_t *err)
+bool net::selector_add(net::selector_t * sel, int fd, selector_event_calback cb, void *arg, err::error_t *err)
 {
     sel_oper_node * node = (sel_oper_node *)malloc(sizeof(sel_oper_node));
     node->value.fd = fd;
@@ -813,13 +854,21 @@ bool net::selector_add(net::selector_t * sel, int fd, selector_event_calback cb,
     node->next = nullptr;
     node->prev = nullptr;
 
-    auto p = alg::dlinklist_push_back(&sel->requests, node);
-    assert(p == node);
+    if ( sel->reqlock ) {
+        mt::mutex_lock(sel->reqlock, nullptr);
+        auto p = alg::dlinklist_push_back(&sel->requests, node);
+        mt::mutex_unlock(sel->reqlock, nullptr);
+        assert(p == node);
+    } else {
+        auto p = alg::dlinklist_push_back(&sel->requests, node);
+        assert(p == node);
+    }
+    
     return true;
 }
 
 inline 
-bool net::selector_remove(net::selector_t * sel, int fd, error_t *err) 
+bool net::selector_remove(net::selector_t * sel, int fd, err::error_t *err) 
 {
     sel_oper_node * node = (sel_oper_node *)malloc(sizeof(sel_oper_node));
     node->value.fd = fd;
@@ -827,13 +876,21 @@ bool net::selector_remove(net::selector_t * sel, int fd, error_t *err)
     node->next = nullptr;
     node->prev = nullptr;
 
-    auto p = alg::dlinklist_push_back(&sel->requests, node);
-    assert(p);
+    if ( sel->reqlock ) {
+        mt::mutex_lock(sel->reqlock, nullptr);
+        auto p = alg::dlinklist_push_back(&sel->requests, node);
+        mt::mutex_unlock(sel->reqlock, nullptr);
+        assert(p == node);
+    } else {
+        auto p = alg::dlinklist_push_back(&sel->requests, node);
+        assert(p == node);
+    }
+
     return true;
 }
 
 inline 
-bool net::selector_request(net::selector_epoll* sel, int fd, int events, int64_t expire, net::error_info*)
+bool net::selector_request(net::selector_epoll* sel, int fd, int events, int64_t expire, err::error_info*)
 {
     sel_oper_node * node = (sel_oper_node *)malloc(sizeof(sel_oper_node));
     node->value.fd = fd;
@@ -843,16 +900,31 @@ bool net::selector_request(net::selector_epoll* sel, int fd, int events, int64_t
     node->value.arg = nullptr;
     node->next = nullptr;
     node->prev = nullptr;
-    auto p = alg::dlinklist_push_back(&sel->requests, node);
-    assert(p);
+    
+    if ( sel->reqlock ) {
+        mt::mutex_lock(sel->reqlock, nullptr);
+        auto p = alg::dlinklist_push_back(&sel->requests, node);
+        mt::mutex_unlock(sel->reqlock, nullptr);
+        assert(p == node);
+    } else {
+        auto p = alg::dlinklist_push_back(&sel->requests, node);
+        assert(p == node);
+    }
     return true;
 }
 
 inline 
-int  net::selector_run(net::selector_t *sel, net::error_t *err)
+int  net::selector_run(net::selector_t *sel, err::error_t *err)
 {
-    // 从请求队列中取出需要处理的事件操作，这里没加锁，因此暂不支持并发，后续补充
-    auto rnode = dlinklist_pop_front(&sel->requests);
+    // 从请求队列中取出需要处理的事件操作, 先创建一个新的链表，并将requests链表转移到新建的链表，
+    // 转移后清空requests，转移过程对requests加锁，这样等于批量获取，避免长时间对requests加锁。
+    sel_oper_list operlst = sel->requests;
+    if ( sel->reqlock ) mt::mutex_lock(sel->reqlock, nullptr);
+    alg::dlinklist_init(&sel->requests);
+    if ( sel->reqlock ) mt::mutex_unlock(sel->reqlock, nullptr);
+
+    // 逐个获取请求节点操作。
+    auto rnode = alg::dlinklist_pop_front(&operlst);
     while ( rnode ) {
         assert(rnode->value.fd >= 0);
         if ( rnode->value.opevents == select_add ) {
