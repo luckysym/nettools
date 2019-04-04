@@ -24,8 +24,8 @@ int main(int argc, char **argv)
         fprintf(stderr, "[error] bad url for pasing, %s\n", remote);
         return -1;
     }
-    struct net::error_info err;
-    net::init_error_info(&err);
+    err::error_t err;
+    err::init_error_info(&err);
     
     // open socket channel
     int opts = net::sockopt_tcp_nodelay | net::sockopt_linger | net::sockopt_nonblocked;
@@ -33,7 +33,7 @@ int main(int argc, char **argv)
     int fd = net::socket_open_channel(&loc, opts, &err);
     if ( fd == -1 ) {
         fprintf(stderr, "[error] failed to open socket channel, %s\n", err.str);
-        net::free_error_info(&err);
+        err::free_error_info(&err);
         return -1;
     }
     sleep(1);
@@ -43,7 +43,7 @@ int main(int argc, char **argv)
     int bytes = net::socket_sendn(fd, message, len, 5000, &err);
     if ( bytes != len ) {
         fprintf(stderr, "[error] failed to send message, fd: %d, len: %d, sent: %d, %s\n", fd, len, bytes, err.str);
-        net::free_error_info(&err);
+        err::free_error_info(&err);
         net::socket_close(fd, nullptr);
         return -1;
     }
@@ -53,7 +53,7 @@ int main(int argc, char **argv)
     bytes = net::socket_recvn(fd, rbuf, len, 5000, &err);
     if ( bytes != len ) {
         fprintf(stderr, "[error] failed to recv message, fd: %d, len: %d, received: %d, %s\n", fd, len, bytes, err.str);
-        net::free_error_info(&err);
+        err::free_error_info(&err);
         net::socket_close(fd, nullptr);
         return -1;
     }
