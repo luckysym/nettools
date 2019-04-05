@@ -28,10 +28,10 @@ namespace alg {
     }; // end struct basic_dlink_list
 
     template<class T>
-    basic_array<T> * array_alloc(basic_array<T> * arr, size_t size);
+    basic_array<T> * array_alloc(basic_array<T> * arr, size_t size, const T * init = nullptr);
 
     template<class T>
-    basic_array<T> * array_realloc(basic_array<T> * arr, size_t size);
+    basic_array<T> * array_realloc(basic_array<T> * arr, size_t size, const T * init = nullptr);
     
     template<class T>
     void array_free(basic_array<T> * arr);
@@ -54,11 +54,15 @@ namespace alg
 {
 
 template<class T>
-basic_array<T> * array_alloc(alg::basic_array<T> * arr, size_t size)
+basic_array<T> * array_alloc(alg::basic_array<T> * arr, size_t size, const T * init)
 {
     arr->values = (T*)malloc(sizeof(T) * size);
     assert(arr->values);
     arr->size = size;
+
+    if ( init ) {
+        for (size_t i = 0 ; i < size; ++i) arr->values[i] = *init;
+    }
     return arr;
 }
 
@@ -72,11 +76,15 @@ void array_free(basic_array<T> * arr) {
 }
 
 template<class T>
-basic_array<T> * array_realloc(alg::basic_array<T> * arr, size_t size)
+basic_array<T> * array_realloc(alg::basic_array<T> * arr, size_t size, const T *init)
 {
     if ( arr->size < size ) {
         arr->values = (T*)::realloc(arr->values, sizeof(T) * size);
         assert(arr->values);
+
+        if ( init ) {
+            for (size_t i = arr->size ; i < size; ++i) arr->values[i] = *init;
+        }
     }
     arr->size = size;
     return arr;
