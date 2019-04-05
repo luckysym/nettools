@@ -1,5 +1,6 @@
 
 #include <sym/network.h>
+#include <sym/nio.h>
 #include <sym/io.h>
 #include <stdio.h>
 #include <assert.h>
@@ -12,7 +13,7 @@ struct echo_channel
     int               fd;
     net::location_t   remote;
     io::buffer_t      rdbuf;
-    net::selector_t * selector;
+    nio::selector_t * selector;
 };
 
 /**
@@ -51,8 +52,8 @@ int main(int argc, char **argv)
     sleep(1);
 
     // create selector 
-    net::selector_t selector ;
-    auto sel = net::selector_init(&selector, 0, &err);
+    nio::selector_t selector ;
+    auto sel = nio::selector_init(&selector, 0, &err);
     if ( !sel ) {
         fprintf(stderr, "[error] failed to create selector, %s", err.str);
         err::free_error_info(&err);
@@ -61,22 +62,22 @@ int main(int argc, char **argv)
     }
 
     // add listener to selector
-    bool isok = net::selector_add(sel, sfd, listner_event_proc, &sel, &err);
+    bool isok = nio::selector_add(sel, sfd, listner_event_proc, &sel, &err);
     if ( !isok ) {
         fprintf(stderr, "[error] failed to create selector, %s", err.str);
         err::free_error_info(&err);
-        net::selector_destroy(sel, nullptr);
+        nio::selector_destroy(sel, nullptr);
         net::socket_close(sfd, nullptr);
         return -1;
     }
     
-    int r = net::selector_run(sel, &err);    
+    int r = nio::selector_run(sel, &err);    
     if ( r < 0 ) {
         fprintf(stderr, "[error] failed to run selector, %s", err.str);
         err::free_error_info(&err);
     }
 
-    net::selector_destroy(sel, nullptr);
+    nio::selector_destroy(sel, nullptr);
     net::socket_close(sfd, nullptr);
 
     return 0;
@@ -85,10 +86,10 @@ int main(int argc, char **argv)
 // 监听socket事件回调
 void listner_event_proc(int fd, int event, void *arg)
 {
-    net::selector_t *sel = (net::selector_t*)arg;
+    nio::selector_t *sel = (nio::selector_t*)arg;
     assert(sel);
 
-    if ( event == net::select_accept ) {
+    if ( event == nio::select_accept ) {
         net::location_t remote;
         err::error_t    err;
 
@@ -99,7 +100,7 @@ void listner_event_proc(int fd, int event, void *arg)
             if ( cfd == -1 && err.str) {
                 fprintf(stderr, "[error] failed to accept channel, %s\n", err.str);
                 err::free_error_info(&err);
-                net::selector_remove(sel, fd, &err);
+                nio::selector_remove(sel, fd, &err);
             } else if ( cfd == -1 && err.str == nullptr ) {
                 // no more channel
                 net::location_free(&remote);
@@ -114,20 +115,20 @@ void listner_event_proc(int fd, int event, void *arg)
                 net::location_copy(&ch->remote, &remote);
                 io::buffer_alloc(&ch->rdbuf, 256);
                 
-                bool isok = net::selector_add(sel, cfd, channel_event_proc, ch, &err);
+                bool isok = nio::selector_add(sel, cfd, channel_event_proc, ch, &err);
                 assert(isok);
                 net::location_free(&remote);
             }
         } // end while  
-    } else if ( event == net::select_remove) {
+    } else if ( event == nio::select_remove) {
         fprintf(stderr, "[info] listener will be closed, fd:%d\n", fd);
         net::socket_close(fd, nullptr);
-    } else if ( event == net::select_add ) {
+    } else if ( event == nio::select_add ) {
         // request accept event for no timeout
         err::error_t err;
         err::init_error_info(&err);
-        int revents = net::select_accept;
-        bool isok = net::selector_request(sel, fd, revents, -1, &err);
+        int revents = nio::select_accept;
+        bool isok = nio::selector_request(sel, fd, revents, -1, &err);
         assert( !isok );
     }
     return ;
@@ -141,10 +142,10 @@ void channel_event_proc(int fd, int event, void *arg)
     echo_channel * ch = (echo_channel *)arg;
     assert(ch);
 
-    net::selector_t *sel = ch->selector;
+    nio::selector_t *sel = ch->selector;
     assert(sel);
 
-    if ( event == net::select_read ) {
+    if ( event == nio::select_read ) {
         while (1) {
             int    remain = 0;
             
@@ -165,7 +166,7 @@ void channel_event_proc(int fd, int event, void *arg)
                 ch->rdbuf.end += r;
 
                 // request write
-                bool sok = net::selector_request(sel, fd, net::select_write, -1, &err);
+                bool sok = nio::selector_request(sel, fd, nio::select_write, -1, &err);
                 assert(sok);
             } else if ( r == 0 ) {
                 // nothing received
@@ -173,18 +174,18 @@ void channel_event_proc(int fd, int event, void *arg)
             } else {
                 // error, or remote closed
                 fprintf(stderr, "[info] channel recv failed, fd:%d\n", fd);
-                bool sok = net::selector_remove(sel, fd, &err);
+                bool sok = nio::selector_remove(sel, fd, &err);
                 assert(sok);
             }
         }
-    } else if ( event == net::select_write ) {
+    } else if ( event == nio::select_write ) {
         while ( 1 ) {
             char * ptr = ch->rdbuf.data + ch->rdbuf.begin;
             int    remain = ch->rdbuf.end - ch->rdbuf.begin;
             
             if ( remain == 0 ) {
                 // all sent, receive next
-                bool sok = net::selector_request(sel, fd, net::select_read, -1, &err);
+                bool sok = nio::selector_request(sel, fd, nio::select_read, -1, &err);
                 assert(sok);
                 break; 
             }
@@ -200,11 +201,11 @@ void channel_event_proc(int fd, int event, void *arg)
             } else {
                 // send error
                 fprintf(stderr, "[info] channel send failed, fd:%d\n", fd);
-                bool sok = net::selector_remove(sel, fd, &err);
+                bool sok = nio::selector_remove(sel, fd, &err);
                 assert(sok);
             }
         }
-    } else if ( event == net::select_remove) {
+    } else if ( event == nio::select_remove) {
 
         fprintf(stderr, "[info] channel will be closed, fd:%d\n", fd);
 
@@ -213,15 +214,15 @@ void channel_event_proc(int fd, int event, void *arg)
         net::location_free(&ch->remote);
 
         ch->fd = -1;
-    } else if ( event == net::select_add ) {
+    } else if ( event == nio::select_add ) {
         
         // channel added, wait for reading
-        bool sok = net::selector_request(sel, fd, net::select_read, -1, &err);
+        bool sok = nio::selector_request(sel, fd, nio::select_read, -1, &err);
         assert(sok);
         
-    } else if ( event == net::select_error ) {
+    } else if ( event == nio::select_error ) {
         fprintf(stderr, "[info] channel wait error, fd:%d\n", fd);
-        bool sok = net::selector_remove(sel, fd, &err);
+        bool sok = nio::selector_remove(sel, fd, &err);
         assert(sok);
     } else {
         assert("bad select event" == nullptr);
