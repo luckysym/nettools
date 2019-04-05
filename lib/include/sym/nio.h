@@ -39,7 +39,7 @@ namespace nio
     /// 事件超时设置节点
     typedef struct select_expiration {
         int       fd;
-        int       events;
+        int       ops;
         int64_t   exp;
         int       inque;
     }  sel_expire_t;
@@ -112,9 +112,6 @@ namespace nio
         bool selector_remove_internal(selector_epoll * sel, sel_oper_t *oper, err::error_t *e);
         bool selector_request_internal(selector_epoll *sel, sel_oper_t *oper, err::error_t *e);
         bool selector_run_internal(selector_epoll *sel);
-
-        bool selector_scan_timeout(selector_t *sel);
-
     } // end namespace detail
 } // end namespace nio
 
@@ -285,11 +282,34 @@ int  nio::selector_run(nio::selector_t *sel, err::error_t *err)
         free(rnode);
     }
 
-    // 等待事件，并在事件触发后执行回调，返回触发的事件数
+    // 等待事件，并在事件触发后执行回调（不包括超时），返回触发的事件数
     int r1 = epoll::selector_run_internal(sel);
 
-    // 处理超时任务
-    int r2 = epoll::selector_scan_timeout(sel);
+    // 处理超时
+    int64_t now = chrono::now();
+    auto tnode = sel->timeouts.front;
+    while ( tnode && tnode->value.exp > now ) {  // 第一个没超时，就假设后面的都没超时
+        // 超时了，执行回调，重设epoll, 踢出队列.
+        //
+        sel_item_t *p = sel->items.values + tnode->value.fd;
+        p->callback(p->fd, select_timeout | tnode->value.ops, p->arg);
+
+        if ( tnode->value.ops & select_read ) p->events &= ~(EPOLLIN);
+        else if ( tnode->value.ops & select_write ) p->events &= ~(EPOLLOUT);
+        else assert(false);   // 没有其他操作类型
+
+        struct epoll_event evt;
+        evt.events = p->events;
+        evt.data.fd = p->fd;
+        int r = epoll_ctl(sel->epfd, EPOLL_CTL_MOD, p->fd, &evt);
+        assert(r == 0);
+
+        auto n = dlinklist_pop_front(&sel->timeouts);
+        assert(n == tnode);
+        tnode->value.inque = 0;
+        
+        tnode = sel->timeouts.front;  // c重新获取第一个节点。
+    }
 
     return r1;
 } // nio::selector_run
@@ -303,6 +323,8 @@ sel_item_t * selector_add_internal(selector_epoll *sel, sel_oper_t *oper, err::e
     if ( oper->fd >= sel->items.size ) {
         select_item item;
         item.fd = -1;
+        item.rd.value.ops = select_read;
+        item.wr.value.ops = select_write;
         alg::array_realloc(&sel->items, oper->fd + 1, &item);
     }
 
@@ -318,11 +340,11 @@ sel_item_t * selector_add_internal(selector_epoll *sel, sel_oper_t *oper, err::e
     assert(r == 0);
 
     // add to table
-    p->fd = oper->fd;
+    p->fd = p->wr.value.fd = p->rd.value.fd = oper->fd;
     p->events = oper->ops;
     p->callback = oper->callback;
     p->arg = oper->arg;
-
+    
     return p;
 }
 
