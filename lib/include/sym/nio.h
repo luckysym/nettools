@@ -28,7 +28,6 @@ namespace nio
     const int select_error   = 8;
     const int select_add     = 16;
     const int select_remove  = 23;
-    const int select_persist = 128;
 
     const int init_list_size = 128;  ///< 列表初始化大小
 
@@ -47,18 +46,18 @@ namespace nio
     typedef alg::basic_dlink_node<sel_expire_t> sel_expire_node;
 
     typedef struct select_item {
-        int fd;
-        int epevents;    ///< current requested epoll events
+        int    fd;
+        int    events;    ///< current requested epoll events
         selector_event_calback  callback;
         void   *arg;
-        sel_expire_node rdexp;
-        sel_expire_node wrexp; 
+        sel_expire_node rd;
+        sel_expire_node wr; 
     } sel_item_t;
     typedef alg::basic_dlink_node<sel_item_t> sel_item_node;
 
     typedef struct select_operation {
         int     fd;
-        int     opevents;  ///< requested operation events
+        int     ops;  ///< requested operation events
         int64_t expire;
         selector_event_calback  callback;
         void   *arg;
@@ -75,7 +74,6 @@ namespace nio
         sel_oper_list     requests;  ///< request operation queue
         sel_item_array    items;     ///< registered items
         sel_expire_list   timeouts;  ///< timeout queue
-        sel_expire_list   persists;  ///< persist event list
         int               count;     ///< total fd registered in epoll
     };
     struct selector_epoll {
@@ -83,7 +81,6 @@ namespace nio
         sel_oper_list     requests;  ///< request operation queue
         sel_item_array    items;     ///< registered items
         sel_expire_list   timeouts;  ///< timeout queue
-        sel_expire_list   persists;  ///< persist event list
         int               count;     ///< total fd registered in epoll
 
         int               epfd;     ///< epoll fd
@@ -109,13 +106,12 @@ namespace nio
     /// run the selector
     int  selector_run(selector_t *sel, err::error_t *err);
 
+    namespace epoll {
 
-    namespace detail {
-
-        bool selector_add_internal(selector_t * sel, sel_oper_t * oper);
-        bool selector_remove_internal(selector_t * sel, sel_oper_t *oper);
-        bool selector_request_internal(selector_t *sel, sel_oper_t *oper);
-        bool selector_run_internal(selector_t *sel);
+        sel_item_t * selector_add_internal(selector_epoll * sel, sel_oper_t * oper, err::error_t *e);
+        bool selector_remove_internal(selector_epoll * sel, sel_oper_t *oper, err::error_t *e);
+        bool selector_request_internal(selector_epoll *sel, sel_oper_t *oper, err::error_t *e);
+        bool selector_run_internal(selector_epoll *sel);
 
         bool selector_scan_timeout(selector_t *sel);
 
@@ -197,7 +193,7 @@ bool nio::selector_add(nio::selector_t * sel, int fd, selector_event_calback cb,
 {
     sel_oper_node * node = (sel_oper_node *)malloc(sizeof(sel_oper_node));
     node->value.fd = fd;
-    node->value.opevents = select_add;
+    node->value.ops = select_add;
     node->value.callback = cb;
     node->value.arg = arg;
     node->next = nullptr;
@@ -221,7 +217,7 @@ bool nio::selector_remove(nio::selector_t * sel, int fd, err::error_t *err)
 {
     sel_oper_node * node = (sel_oper_node *)malloc(sizeof(sel_oper_node));
     node->value.fd = fd;
-    node->value.opevents = select_remove;
+    node->value.ops = select_remove;
     node->next = nullptr;
     node->prev = nullptr;
 
@@ -243,7 +239,7 @@ bool nio::selector_request(nio::selector_epoll* sel, int fd, int events, int64_t
 {
     sel_oper_node * node = (sel_oper_node *)malloc(sizeof(sel_oper_node));
     node->value.fd = fd;
-    node->value.opevents = events;
+    node->value.ops = events;
     node->value.expire = expire;
     node->value.callback = nullptr;
     node->value.arg = nullptr;
@@ -276,25 +272,88 @@ int  nio::selector_run(nio::selector_t *sel, err::error_t *err)
     auto rnode = alg::dlinklist_pop_front(&operlst);
     while ( rnode ) {
         assert(rnode->value.fd >= 0);
-        if ( rnode->value.opevents == select_add ) {
-            bool isok = detail::selector_add_internal(sel, &rnode->value);
+        if ( rnode->value.ops == select_add ) {
+            bool isok = epoll::selector_add_internal(sel, &rnode->value, err);
             assert(isok);
-        } else if ( rnode->value.opevents == select_remove) {
-            bool isok = detail::selector_remove_internal(sel, &rnode->value);
+        } else if ( rnode->value.ops == select_remove) {
+            bool isok = epoll::selector_remove_internal(sel, &rnode->value, err);
             assert(isok);
         } else {
-            bool isok = detail::selector_request_internal(sel, &rnode->value);
+            bool isok = epoll::selector_request_internal(sel, &rnode->value, err);
             assert(isok);
         }
         free(rnode);
     }
 
     // 等待事件，并在事件触发后执行回调，返回触发的事件数
-    int r1 = detail::selector_run_internal(sel);
+    int r1 = epoll::selector_run_internal(sel);
 
     // 处理超时任务
-    int r2 = detail::selector_scan_timeout(sel);
+    int r2 = epoll::selector_scan_timeout(sel);
 
     return r1;
 } // nio::selector_run
 
+namespace nio {
+namespace epoll {
+
+sel_item_t * selector_add_internal(selector_epoll *sel, sel_oper_t *oper, err::error_t *err)
+{
+    // 扩充表
+    if ( oper->fd >= sel->items.size ) {
+        select_item item;
+        item.fd = -1;
+        alg::array_realloc(&sel->items, oper->fd + 1, &item);
+    }
+
+    // get select_item pointer from table
+    select_item * p = sel->items.values + oper->fd;
+    assert(p->fd == -1);
+    
+    // registry to epoll
+    struct epoll_event e;
+    e.events = 0;
+    e.data.fd = oper->fd;
+    int r = epoll_ctl(sel->epfd, EPOLL_CTL_ADD, oper->fd, &e);
+    assert(r == 0);
+
+    // add to table
+    p->fd = oper->fd;
+    p->events = oper->ops;
+    p->callback = oper->callback;
+    p->arg = oper->arg;
+
+    return p;
+}
+
+bool selector_remove_internal(selector_epoll * sel, sel_oper_t *oper, err::error_t *err)
+{
+    // get select_item pointer from table
+    select_item * p = sel->items.values + oper->fd;
+    assert( p->fd == oper->fd );
+
+    // remove from epoll
+    int r = epoll_ctl(sel->epfd, EPOLL_CTL_DEL, oper->fd, nullptr);
+    assert(r == 0);
+
+    // remove from timeout queue
+    auto node = sel->timeouts.front;
+    while ( node && p->rd.value.inque && p->wr.value.inque) {
+        auto node2 = node->next;
+        if ( node->value.fd == p->fd ) {
+            auto n = dlinklist_remove(&sel->timeouts, node);
+            node->value.inque = 0;
+        }
+        node = node2;
+    }
+
+    // remove from table;
+    p->fd = -1;
+    p->events = 0;
+    p->callback = nullptr;
+    p->arg = nullptr;
+
+    return true;
+}
+
+}} // end namespace nio::detail

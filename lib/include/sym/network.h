@@ -22,7 +22,6 @@
 #define UNIX_PATH_MAX 108
 #endif
 
-
 namespace net {
     
     // socket options bit flags
