@@ -22,20 +22,6 @@
 #define UNIX_PATH_MAX 108
 #endif
 
-#include <pthread.h>
-
-/// namespace for multi-thread 
-namespace mt {
-    typedef pthread_mutex_t mutex_t;
-
-    bool mutex_init(mutex_t *m, err::error_t * err);
-
-    bool mutex_free(mutex_t *m, err::error_t * err);
-
-    bool mutex_lock(mutex_t * m, err::error_t * err);
-
-    bool mutex_unlock(mutex_t * m, err::error_t * err);
-} // end namespace mt
 
 namespace net {
     
