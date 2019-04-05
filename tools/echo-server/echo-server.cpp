@@ -89,7 +89,7 @@ void listner_event_proc(int fd, int event, void *arg)
     nio::selector_t *sel = (nio::selector_t*)arg;
     assert(sel);
 
-    if ( event == nio::select_accept ) {
+    if ( event == nio::select_read ) {
         net::location_t remote;
         err::error_t    err;
 
@@ -127,7 +127,7 @@ void listner_event_proc(int fd, int event, void *arg)
         // request accept event for no timeout
         err::error_t err;
         err::init_error_info(&err);
-        int revents = nio::select_accept;
+        int revents = nio::select_read;
         bool isok = nio::selector_request(sel, fd, revents, -1, &err);
         assert( !isok );
     }

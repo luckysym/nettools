@@ -2,10 +2,10 @@
 
 #include <sym/algorithm.h>
 #include <sym/error.h>
+#include <sym/chrono.h>
 
 #include <sys/types.h>
 #include <sys/socket.h>
-#include <sys/time.h>
 #include <sys/un.h>
 #include <netinet/tcp.h>
 #include <arpa/inet.h>
@@ -57,10 +57,6 @@ namespace net {
         int    port;
         char * path;
     } location_t;
-
-
-    /// gets and returns current timestamp in microseconds from epoch-time 
-    int64_t now();
 
     /// init a location struct
     struct location * location_init(struct location *loc);
@@ -120,13 +116,7 @@ namespace net {
     bool socket_close(int fd, struct err::error_info *err);
 } // end namespace net 
 
-inline
-int64_t net::now() 
-{
-    struct timeval tv;
-    gettimeofday(&tv, nullptr);
-    return tv.tv_sec * 1000000LL + tv.tv_usec;
-}
+
 
 inline 
 net::location * net::location_init(net::location *loc)
@@ -291,7 +281,7 @@ int net::socket_recvn(int fd, char *data, int len, int timeout, err::error_info 
     struct pollfd pfd;
     pfd.fd = fd;
     pfd.events = POLLIN;
-    int64_t now = net::now();
+    int64_t now = chrono::now();
     int64_t exp = now + (int64_t)timeout * 1000;
     int pos = 0;
 
@@ -320,7 +310,7 @@ int net::socket_recvn(int fd, char *data, int len, int timeout, err::error_info 
                 return -1;  // failed
             }
         }
-        now = net::now();
+        now = chrono::now();
         if ( exp - now > 0 ) {
             timeout = (int)((exp - now) / 1000);
         } else {
@@ -336,7 +326,7 @@ int net::socket_sendn(int fd, const char *data, int len, int timeout, err::error
     struct pollfd pfd;
     pfd.fd = fd;
     pfd.events = POLLOUT;
-    int64_t now = net::now();
+    int64_t now = chrono::now();
     int64_t exp = now + (int64_t)timeout * 1000;
     int pos = 0;
 
@@ -366,7 +356,7 @@ int net::socket_sendn(int fd, const char *data, int len, int timeout, err::error
                 return -1;  // failed
             }
         }
-        now = net::now();
+        now = chrono::now();
         if ( exp - now > 0 ) {
             timeout = (int)((exp - now) / 1000);
         } else {
