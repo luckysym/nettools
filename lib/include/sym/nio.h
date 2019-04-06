@@ -111,7 +111,7 @@ namespace nio
         sel_item_t * selector_add_internal(selector_epoll * sel, sel_oper_t * oper, err::error_t *e);
         bool selector_remove_internal(selector_epoll * sel, sel_oper_t *oper, err::error_t *e);
         bool selector_request_internal(selector_epoll *sel, sel_oper_t *oper, err::error_t *e);
-        bool selector_run_internal(selector_epoll *sel);
+        bool selector_run_internal(selector_epoll *sel, err::error_t *e);
 
     } // end namespace detail
 } // end namespace nio
@@ -284,7 +284,7 @@ int  nio::selector_run(nio::selector_t *sel, err::error_t *err)
     }
 
     // 等待事件，并在事件触发后执行回调（不包括超时），返回触发的事件数
-    int r1 = epoll::selector_run_internal(sel);
+    int r1 = epoll::selector_run_internal(sel, err);
 
     // 处理超时
     int64_t now = chrono::now();
@@ -414,6 +414,63 @@ bool selector_request_internal(selector_epoll *sel, sel_oper_t *oper, err::error
     assert(r == 0);
 
     return true;
+}
+
+inline 
+bool selector_run_internal(selector_epoll *sel, err::error_t *e)
+{
+    if ( sel->timeouts.size == 0 ) return 0;  // 没有需要等待的事件
+
+    // 计算超时时间。从超时队列获取第一个节点。如果第一个节点已经超时，超时时间设为0.
+    int64_t now = chrono::now();
+    auto tn = sel->timeouts.front;
+    int timeout = 0;
+    if ( now > tn->value.exp ) timeout = (now - tn->value.exp) / 1000;
+
+    // epoll wait
+    int r = epoll_wait(sel->epfd, sel->events.values, sel->events.size, timeout);
+    if ( r > 0 ) {
+        for( int i = 0; i < r; ++i ) {
+            epoll_event * evt = sel->events.values + i;
+            int fd = evt->data.fd;
+            int events = evt->events;
+            sel_item_t * p = sel->items.values + fd;
+
+            // 无论是否异常，有消息可读就先读. 而异常和可写，只处理一个
+            if ( events & EPOLLIN ) {
+                p->callback(fd, select_read, p->arg);  // 回调
+                dlinklist_remove(&sel->timeouts, &p->rd);
+                p->rd.value.inque = 0;
+                p->events &= (~EPOLLIN);
+            }
+            if ( events & EPOLLERR ) {
+                p->callback(fd, select_error, p->arg);
+                if ( p->rd.value.inque ) {
+                    dlinklist_remove(&sel->timeouts, &p->rd);
+                    p->rd.value.inque = 0;
+                }
+                if ( p->wr.value.inque ) {
+                    dlinklist_remove(&sel->timeouts, &p->wr);
+                    p->wr.value.inque = 0;
+                }
+                p->events = 0;
+            } else if ( events & EPOLLOUT ) {
+                p->callback(fd, select_write, p->arg);
+                dlinklist_remove(&sel->timeouts, &p->wr);
+                p->wr.value.inque = 0;
+                p->events &= (~EPOLLOUT);
+            }
+
+            // 相关事件已完成，重新设置并去掉已发生的epoll监听
+            struct epoll_event evt1;
+            evt1.events = p->events;
+            evt1.data.fd = fd;
+            int c = epoll_ctl(sel->epfd, EPOLL_CTL_MOD, fd, &evt1);
+            assert(c == 0);
+        }
+    }
+    assert( r >= 0);
+    return r;
 }
 
 }} // end namespace nio::detail
