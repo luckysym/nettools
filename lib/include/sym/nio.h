@@ -303,6 +303,9 @@ bool nio::selector_add(nio::selector_t * sel, int fd, selector_event_calback cb,
     int64_t n = 1;
     int r = write(sel->evfd, &n, sizeof(n));   // 通知event fd
     assert( r > 0);
+
+    fprintf(stderr, "[trace][nio] selector_add, fd: %d\n", fd);
+
     return true;
 }
 
@@ -329,6 +332,8 @@ bool nio::selector_remove(nio::selector_t * sel, int fd, err::error_t *err)
     int r = write(sel->evfd, &n, sizeof(n));   // 通知event fd
     assert( r > 0);
 
+    fprintf(stderr, "[trace][nio] selector_remove, fd: %d\n", fd);
+
     return true;
 }
 
@@ -338,7 +343,7 @@ bool nio::selector_request(nio::selector_epoll* sel, int fd, int events, int64_t
     sel_oper_node * node = (sel_oper_node *)malloc(sizeof(sel_oper_node));
     node->value.fd = fd;
     node->value.ops = events;
-    node->value.expire = expire;
+    node->value.expire = expire==-1?INT64_MAX:expire;
     node->value.callback = nullptr;
     node->value.arg = nullptr;
     node->next = nullptr;
@@ -358,16 +363,20 @@ bool nio::selector_request(nio::selector_epoll* sel, int fd, int events, int64_t
     int r = write(sel->evfd, &n, sizeof(n));   // 通知event fd
     assert( r > 0);
 
+    fprintf(stderr, "[trace][nio] selector_request, fd: %d, ops: %d\n", fd, events);
+
     return true;
 }
 
 inline 
 int  nio::selector_run(nio::selector_t *sel, err::error_t *err)
 {
+    fprintf(stderr, "selector_run \n");
     // 从请求队列中取出需要处理的事件操作, 先创建一个新的链表，并将requests链表转移到新建的链表，
     // 转移后清空requests，转移过程对requests加锁，这样等于批量获取，避免长时间对requests加锁。
-    sel_oper_list operlst = sel->requests;
+    
     if ( sel->reqlock ) mt::mutex_lock(sel->reqlock, nullptr);
+    sel_oper_list operlst = sel->requests;
     alg::dlinklist_init(&sel->requests);
     if ( sel->reqlock ) mt::mutex_unlock(sel->reqlock, nullptr);
 
@@ -459,6 +468,8 @@ sel_item_t * selector_add_internal(selector_epoll *sel, sel_oper_t *oper, err::e
     sel->count += 1;
     array_realloc(&sel->events, sel->count + 1);  // 还有一个是event fd
     
+    fprintf(stderr, "[trace][nio] selector_add_internal, fd:%d\n", oper->fd);
+
     return p;
 }
 
@@ -496,6 +507,7 @@ bool selector_remove_internal(selector_epoll * sel, sel_oper_t *oper, err::error
     sel->count -= 1;
     array_realloc(&sel->events, sel->count + 1); // 还有一个event fd
 
+    fprintf(stderr, "[trace][nio] selector_remove_internal, fd:%d, ops: %d\n", oper->fd, oper->ops);
     return true;
 }
 
@@ -541,7 +553,7 @@ bool selector_request_internal(selector_epoll *sel, sel_oper_t *oper, err::error
 inline 
 bool selector_run_internal(selector_epoll *sel, err::error_t *e)
 {
-    if ( sel->timeouts.size == 0 ) return 0;  // 没有需要等待的事件
+    // if ( sel->timeouts.size == 0 ) return 0;  // 没有需要等待的事件
 
     // 计算超时时间。从超时队列获取第一个节点。如果第一个节点已经超时，超时时间设为0.
 
@@ -549,7 +561,7 @@ bool selector_run_internal(selector_epoll *sel, err::error_t *e)
     if ( sel->timeouts.front ) {
         int64_t now = chrono::now();
         auto tn = sel->timeouts.front;
-        if ( now > tn->value.exp ) timeout = (now - tn->value.exp) / 1000;
+        if ( tn->value.exp > now ) timeout = (tn->value.exp - now) / 1000;
     }
 
     fprintf(stderr, "[trace][nio] begin epoll_wait, timeout %d\n", timeout);

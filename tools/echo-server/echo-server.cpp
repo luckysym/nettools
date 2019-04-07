@@ -62,7 +62,7 @@ int main(int argc, char **argv)
     }
 
     // add listener to selector
-    bool isok = nio::selector_add(sel, sfd, listner_event_proc, &sel, &err);
+    bool isok = nio::selector_add(sel, sfd, listner_event_proc, sel, &err);
     if ( !isok ) {
         fprintf(stderr, "[error] failed to create selector, %s", err.str);
         err::free_error_info(&err);
