@@ -71,10 +71,13 @@ int main(int argc, char **argv)
         return -1;
     }
     
-    int r = nio::selector_run(sel, &err);    
-    if ( r < 0 ) {
-        fprintf(stderr, "[error] failed to run selector, %s", err.str);
-        err::free_error_info(&err);
+    while ( 1) {
+        int r = nio::selector_run(sel, &err);    
+        if ( r < 0 ) {
+            fprintf(stderr, "[error] failed to run selector, %s", err.str);
+            err::free_error_info(&err);
+            break;
+        }
     }
 
     nio::selector_destroy(sel, nullptr);
@@ -92,6 +95,8 @@ void listner_event_proc(int fd, int event, void *arg)
     if ( event == nio::select_read ) {
         net::location_t remote;
         err::error_t    err;
+
+        fprintf(stderr, "[info] listener acceptable, fd:%d\n", fd);
 
         net::location_init(&remote);
         err::init_error_info(&err);
@@ -124,12 +129,13 @@ void listner_event_proc(int fd, int event, void *arg)
         fprintf(stderr, "[info] listener will be closed, fd:%d\n", fd);
         net::socket_close(fd, nullptr);
     } else if ( event == nio::select_add ) {
+        fprintf(stderr, "[trace] listener is added to selector, request for accepting, fd:%d\n", fd);
         // request accept event for no timeout
         err::error_t err;
         err::init_error_info(&err);
         int revents = nio::select_read;
         bool isok = nio::selector_request(sel, fd, revents, -1, &err);
-        assert( !isok );
+        assert( isok );
     }
     return ;
 }
