@@ -405,6 +405,9 @@ sel_item_t * selector_add_internal(selector_epoll *sel, sel_oper_t *oper, err::e
 
     // added callback;
     p->callback(p->fd, select_remove, p->arg);
+
+    // extend epoll events 
+    array_realloc(&sel->events, sel->events.size + 1);
     
     return p;
 }
@@ -438,6 +441,9 @@ bool selector_remove_internal(selector_epoll * sel, sel_oper_t *oper, err::error
     p->events = 0;
     p->callback = nullptr;
     p->arg = nullptr;
+
+    // reduce epoll result events
+    array_realloc(&sel->events, sel->events.size - 1);
 
     return true;
 }
