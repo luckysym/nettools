@@ -188,6 +188,12 @@ nio::selector_t * nio::selector_init(nio::selector_t *sel, int options, err::err
     alg::dlinklist_init(&sel->requests);
     alg::dlinklist_init(&sel->timeouts);
 
+    sel->items.values = nullptr;
+    sel->items.size   = 0;
+
+    sel->events.values = nullptr;
+    sel->events.size   = 0;
+
     // 根据options设置判断是否需要对request队列创建访问锁
     sel->reqlock = nullptr;
     if ( options & selopt_thread_safe ) {
