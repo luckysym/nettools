@@ -184,8 +184,7 @@ nio::selector_t * nio::selector_init(nio::selector_t *sel, int options, err::err
 
     sel->epfd = fd;
     sel->count = 0;
-    alg::array_alloc(&sel->items, init_list_size);
-    alg::array_alloc(&sel->events, init_list_size);
+
     alg::dlinklist_init(&sel->requests);
     alg::dlinklist_init(&sel->timeouts);
 
@@ -338,6 +337,7 @@ int  nio::selector_run(nio::selector_t *sel, err::error_t *err)
             assert(isok);
         }
         free(rnode);
+        rnode = alg::dlinklist_pop_front(&operlst);  // 取下一个节点。
     }
 
     // 等待事件，并在事件触发后执行回调（不包括超时），返回触发的事件数

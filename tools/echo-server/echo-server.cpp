@@ -22,8 +22,8 @@ struct echo_channel
  */
 int main(int argc, char **argv)
 {
-    if ( argc < 3 ) {
-        fprintf(stderr, "help: %s <remote_url> <message>\n", argv[0]);
+    if ( argc < 2 ) {
+        fprintf(stderr, "help: %s <local_url>\n", argv[0]);
         return 0;
     }
 
