@@ -402,6 +402,9 @@ sel_item_t * selector_add_internal(selector_epoll *sel, sel_oper_t *oper, err::e
     p->events = oper->ops;
     p->callback = oper->callback;
     p->arg = oper->arg;
+
+    // added callback;
+    p->callback(p->fd, select_remove, p->arg);
     
     return p;
 }
@@ -415,6 +418,9 @@ bool selector_remove_internal(selector_epoll * sel, sel_oper_t *oper, err::error
     // remove from epoll
     int r = epoll_ctl(sel->epfd, EPOLL_CTL_DEL, oper->fd, nullptr);
     assert(r == 0);
+
+    // removal callback
+    p->callback(p->fd, select_remove, p->arg);
 
     // remove from timeout queue
     auto node = sel->timeouts.front;
