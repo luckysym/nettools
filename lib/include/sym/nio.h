@@ -87,7 +87,6 @@ namespace nio
     const int select_remove  = 23;
 
     const int init_list_size = 128;  ///< 列表初始化大小
-
     const int selopt_thread_safe = 1;  ///< selector support multi-thread
 
     /// selector event callback function type
@@ -561,11 +560,14 @@ bool selector_run_internal(selector_epoll *sel, err::error_t *e)
     if ( sel->timeouts.front ) {
         int64_t now = chrono::now();
         auto tn = sel->timeouts.front;
-        if ( tn->value.exp > now ) timeout = (tn->value.exp - now) / 1000;
+        if ( tn->value.exp != INT64_MAX && tn->value.exp > now ) 
+            timeout = (int)((tn->value.exp - now) / 1000);
+        fprintf(stderr, "[trace][nio] begin epoll_wait, timeout %d, exp: %lld now %lld\n", 
+            timeout, tn->value.exp, now);
+    } else {
+        fprintf(stderr, "[trace][nio] begin epoll_wait, no timeout %d\n", timeout);
     }
-
-    fprintf(stderr, "[trace][nio] begin epoll_wait, timeout %d\n", timeout);
-
+    
     // epoll wait
     int r = epoll_wait(sel->epfd, sel->events.values, sel->events.size, timeout);
     if ( r > 0 ) {
