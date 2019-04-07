@@ -3,7 +3,7 @@
 #include <sym/error.h>
 
 #include <sys/epoll.h>
-
+#include <sys/eventfd.h>
 #include <pthread.h>
 
 /// namespace for multi-thread 
@@ -138,8 +138,9 @@ namespace nio
         sel_oper_list     requests;  ///< request operation queue
         sel_item_array    items;     ///< registered items
         sel_expire_list   timeouts;  ///< timeout queue
-        int               count;     ///< total fd registered in epoll
+        int               count;     ///< total fd registered in epoll, event fd not involved
 
+        int               evfd;     ///< event fd for nofitier
         int               epfd;     ///< epoll fd
         epoll_event_array events;   ///< receive the output events from epoll_wait
     };
@@ -176,15 +177,8 @@ namespace nio
 inline 
 nio::selector_t * nio::selector_init(nio::selector_t *sel, int options, err::error_t *err)
 {
-    int fd = epoll_create1(EPOLL_CLOEXEC);
-    if ( fd == -1 ) {
-        err::push_error_info(err, 128, "epoll_create1 error, %d, %s", errno, strerror(errno));
-        return nullptr;
-    }
-
-    sel->epfd = fd;
+    // 成员初始化
     sel->count = 0;
-
     alg::dlinklist_init(&sel->requests);
     alg::dlinklist_init(&sel->timeouts);
 
@@ -194,8 +188,38 @@ nio::selector_t * nio::selector_init(nio::selector_t *sel, int options, err::err
     sel->events.values = nullptr;
     sel->events.size   = 0;
 
-    // 根据options设置判断是否需要对request队列创建访问锁
     sel->reqlock = nullptr;
+
+    // create epoll fd
+    sel->epfd = epoll_create1(EPOLL_CLOEXEC);
+    if ( sel->epfd == -1 ) {
+        err::push_error_info(err, 128, "epoll_create1 error, %d, %s", errno, strerror(errno));
+        return nullptr;
+    }
+
+    // create event fd and register into epoll
+    sel->evfd = eventfd(0, EFD_CLOEXEC);
+    if ( sel->evfd == -1 ) {
+        err::push_error_info(err, 128, "eventfd error, %d, %s", errno, strerror(errno));
+        close(sel->epfd);
+        sel->epfd = -1;
+        return nullptr;
+    }
+    struct epoll_event epevt;
+    epevt.events = EPOLLIN;
+    epevt.data.fd = sel->evfd;
+    int r = epoll_ctl(sel->epfd, EPOLL_CTL_ADD, sel->evfd, &epevt);
+    if ( r != 0 ) {
+        err::push_error_info(err, 128, "epoll add eventfd error, %d, %s", errno, strerror(errno));
+        close(sel->epfd);
+        close(sel->evfd);
+        sel->epfd = -1;
+        sel->evfd = -1;
+        return nullptr;
+    }
+    array_realloc(&sel->events, 1);  // 这个是eventfd对应的
+    
+    // 根据options设置判断是否需要对request队列创建访问锁
     if ( options & selopt_thread_safe ) {
         sel->reqlock = (mt::mutex_t*)malloc(sizeof(mt::mutex_t));
         assert(sel->reqlock);
@@ -245,6 +269,13 @@ bool nio::selector_destroy(nio::selector_t *sel, err::error_t *err)
         free( sel->reqlock);
         sel->reqlock = nullptr;
     }
+
+    // close epoll fd and event fd
+    close(sel->epfd);
+    close(sel->evfd);
+    sel->epfd = -1;
+    sel->evfd = -1;
+    
     return true;
 } 
 
@@ -268,7 +299,10 @@ bool nio::selector_add(nio::selector_t * sel, int fd, selector_event_calback cb,
         auto p = alg::dlinklist_push_back(&sel->requests, node);
         assert(p == node);
     }
-    
+
+    int64_t n = 1;
+    int r = write(sel->evfd, &n, sizeof(n));   // 通知event fd
+    assert( r > 0);
     return true;
 }
 
@@ -290,6 +324,10 @@ bool nio::selector_remove(nio::selector_t * sel, int fd, err::error_t *err)
         auto p = alg::dlinklist_push_back(&sel->requests, node);
         assert(p == node);
     }
+
+    int64_t n = 1;
+    int r = write(sel->evfd, &n, sizeof(n));   // 通知event fd
+    assert( r > 0);
 
     return true;
 }
@@ -315,6 +353,11 @@ bool nio::selector_request(nio::selector_epoll* sel, int fd, int events, int64_t
         auto p = alg::dlinklist_push_back(&sel->requests, node);
         assert(p == node);
     }
+
+    int64_t n = 1;
+    int r = write(sel->evfd, &n, sizeof(n));   // 通知event fd
+    assert( r > 0);
+
     return true;
 }
 
@@ -413,7 +456,8 @@ sel_item_t * selector_add_internal(selector_epoll *sel, sel_oper_t *oper, err::e
     p->callback(p->fd, select_add, p->arg);
 
     // extend epoll events 
-    array_realloc(&sel->events, sel->events.size + 1);
+    sel->count += 1;
+    array_realloc(&sel->events, sel->count + 1);  // 还有一个是event fd
     
     return p;
 }
@@ -449,7 +493,8 @@ bool selector_remove_internal(selector_epoll * sel, sel_oper_t *oper, err::error
     p->arg = nullptr;
 
     // reduce epoll result events
-    array_realloc(&sel->events, sel->events.size - 1);
+    sel->count -= 1;
+    array_realloc(&sel->events, sel->count + 1); // 还有一个event fd
 
     return true;
 }
@@ -488,6 +533,8 @@ bool selector_request_internal(selector_epoll *sel, sel_oper_t *oper, err::error
     int r = epoll_ctl(sel->epfd, EPOLL_CTL_MOD, p->fd, &ev);
     assert(r == 0);
 
+    fprintf(stderr, "[trace][nio] selector_request_internal, fd:%d, ops: %d\n", oper->fd, oper->ops);
+
     return true;
 }
 
@@ -497,10 +544,15 @@ bool selector_run_internal(selector_epoll *sel, err::error_t *e)
     if ( sel->timeouts.size == 0 ) return 0;  // 没有需要等待的事件
 
     // 计算超时时间。从超时队列获取第一个节点。如果第一个节点已经超时，超时时间设为0.
-    int64_t now = chrono::now();
-    auto tn = sel->timeouts.front;
-    int timeout = 0;
-    if ( now > tn->value.exp ) timeout = (now - tn->value.exp) / 1000;
+
+    int timeout = -1;
+    if ( sel->timeouts.front ) {
+        int64_t now = chrono::now();
+        auto tn = sel->timeouts.front;
+        if ( now > tn->value.exp ) timeout = (now - tn->value.exp) / 1000;
+    }
+
+    fprintf(stderr, "[trace][nio] begin epoll_wait, timeout %d\n", timeout);
 
     // epoll wait
     int r = epoll_wait(sel->epfd, sel->events.values, sel->events.size, timeout);
@@ -508,6 +560,19 @@ bool selector_run_internal(selector_epoll *sel, err::error_t *e)
         for( int i = 0; i < r; ++i ) {
             epoll_event * evt = sel->events.values + i;
             int fd = evt->data.fd;
+
+            if ( fd == sel->evfd ) {
+                fprintf(stderr, "[trace][nio] epoll_wait, event fd notified, fd: %d\n", fd);
+                if ( evt->events == EPOLLIN) {
+                    int64_t n;
+                    int r = read(sel->evfd, &n, sizeof(n));
+                    assert(r > 0 );
+                } else {
+                    assert(false);
+                }
+                continue;
+            }
+
             int events = evt->events;
             sel_item_t * p = sel->items.values + fd;
 
