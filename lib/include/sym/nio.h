@@ -404,7 +404,7 @@ sel_item_t * selector_add_internal(selector_epoll *sel, sel_oper_t *oper, err::e
     p->arg = oper->arg;
 
     // added callback;
-    p->callback(p->fd, select_remove, p->arg);
+    p->callback(p->fd, select_add, p->arg);
 
     // extend epoll events 
     array_realloc(&sel->events, sel->events.size + 1);
