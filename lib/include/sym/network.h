@@ -430,6 +430,7 @@ socklen_t net::sockaddr_from_location(sockaddr *paddr, socklen_t len, const loca
     struct addrinfo hints;
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = attr.af;
+    socklen_t addrlen = 0;
 
     if ( strcmp(loc->host, "*") ) {
         int r = ::getaddrinfo(loc->host, nullptr, &hints, &res);
@@ -440,14 +441,20 @@ socklen_t net::sockaddr_from_location(sockaddr *paddr, socklen_t len, const loca
             return 0;
         }
         memcpy(paddr, res->ai_addr, res->ai_addrlen);     // 地址整体复制输出
+        addrlen = res->ai_addrlen;
+        if ( res ) freeaddrinfo(res);
     } else {
         // 任意地址，除了sa_family和port，其余都是0
         memset(paddr, 0, len);  
         paddr->sa_family = attr.af;
+        if ( attr.af == AF_INET) addrlen = sizeof(sockaddr_in);
+        else if ( attr.af == AF_INET6 ) addrlen = sizeof( sockaddr_in6);
+        else if ( attr.af == AF_UNIX ) addrlen = sizeof( sockaddr_un);
+        else assert(false);    
     }
     
     ((sockaddr_in*)paddr)->sin_port = htons(loc->port);   // 设置端口，in和in6端口字段位置相同
-    return res->ai_addrlen;
+    return addrlen;
 } // end net::sockaddr_from_location
 
 inline 
