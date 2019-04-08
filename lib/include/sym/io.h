@@ -73,12 +73,12 @@ io::buffer_t * io::buffer_realloc(io::buffer_t *buf, size_t size)
 inline 
 io::buffer_t * io::buffer_pullup(io::buffer_t *buf) 
 {
-    if ( buf->begin = 0 ) return buf;
+    if ( buf->begin == 0 ) return buf;
 
     size_t len = buf->end - buf->begin;
     void * p = memmove(buf->data, buf->data + buf->begin, len);
     assert(p == buf->data);
-    buf->begin -= len;
-    buf->end -= len;
+    buf->begin = 0;
+    buf->end = len;
     return buf;
 }
