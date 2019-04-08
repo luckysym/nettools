@@ -95,7 +95,7 @@ namespace net {
     /// accept a new channel socke from the serve socket fd, return the client socket fd or -1 if nothing accepted.
     /// if -1 returned, check the output error, if err->str is null, means no more channel could be accept,
     /// and if err->str is not null, means accept is error. 
-    int socket_accept(int sfd, location_t *remote, err::error_t *err);
+    int socket_accept(int sfd, int sockopts, location_t *remote, err::error_t *err);
 
     /// close socket fd. returns true if success. 
     bool socket_close(int fd, struct err::error_info *err);
@@ -591,15 +591,50 @@ int net::socket_recv(int fd, char *data, int len, err::error_t *err)
     }
 }
 
-int net::socket_accept(int sfd, location_t *remote, err::error_t *err)
+int net::socket_accept(int sfd, int sockopts, location_t *remote, err::error_t *err)
 {
     char addrbuf[128];
     socklen_t addrlen = 128;
-    int cfd = ::accept(sfd, (sockaddr *)addrbuf, &addrlen);
+
+    int flags = SOCK_CLOEXEC;
+    if ( sockopts & sockopt_nonblocked ) flags |= SOCK_NONBLOCK;
+
+    int cfd = ::accept4(sfd, (sockaddr *)addrbuf, &addrlen, flags);
     if ( cfd >= 0 ) {
+
+        if ( sockopts & sockopt_tcp_nodelay ) {
+            int opt = 1;
+            int r = setsockopt(cfd, IPPROTO_TCP, TCP_NODELAY, &opt, sizeof(opt));
+            if ( r == -1 ) {
+                if ( err ) {
+                    err::push_error_info(
+                        err, 128, "sock_accept: setsockopt tcp_nodelay error, fd=%d, err=%d, %s", 
+                        cfd, errno, strerror(errno));
+                }
+                close(cfd);
+                return -1;
+            }
+        }
+
+        if ( sockopts & sockopt_linger ) {
+            struct linger lg;
+            lg.l_onoff  = 1;
+            lg.l_linger = 30;
+            int r = setsockopt(cfd, SOL_SOCKET, SO_LINGER, &lg, sizeof(lg));
+            if ( r == -1 ) {
+                if ( err ) {
+                    err::push_error_info(err, 128, "sock_accept: setsockopt tcp_nodelay error, fd=%d, err=%d, %s", 
+                        cfd, errno, strerror(errno));
+                }
+                close(cfd);
+                return -1;
+            }
+        }
+
         // new connection accepted
         location_t * p = net::sockaddr_to_location(remote, (sockaddr*)addrbuf, addrlen);
         assert(p);
+        
         return cfd;
     } else {
         int e = errno;
