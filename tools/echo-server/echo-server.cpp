@@ -101,7 +101,7 @@ void listner_event_proc(int fd, int event, void *arg)
         net::location_init(&remote);
         err::init_error_info(&err);
         while (1) {
-            int cfd = net::socket_accept(fd, &remote, &err);
+            int cfd = net::socket_accept(fd, net::sockopt_nonblocked | net::sockopt_tcp_nodelay, &remote, &err);
             if ( cfd == -1 && err.str) {
                 fprintf(stderr, "[error] failed to accept channel, %s\n", err.str);
                 err::free_error_info(&err);
@@ -125,6 +125,10 @@ void listner_event_proc(int fd, int event, void *arg)
                 net::location_free(&remote);
             }
         } // end while  
+
+        // 继续监听accept事件
+        bool rok = nio::selector_request(sel, fd, nio::select_read, -1, nullptr);
+        assert(rok);
     } else if ( event == nio::select_remove) {
         fprintf(stderr, "[info] listener will be closed, fd:%d\n", fd);
         net::socket_close(fd, nullptr);
@@ -151,17 +155,19 @@ void channel_event_proc(int fd, int event, void *arg)
     nio::selector_t *sel = ch->selector;
     assert(sel);
 
+    bool is_error = false;
+
     if ( event == nio::select_read ) {
-        fprintf(stderr, "[trace] channel_event_proc, read, fd: %d\n", fd);
+        fprintf(stderr, "[trace] channel_event_proc, read, fd: %d, buf: %d - %d\n", fd, ch->rdbuf.begin, ch->rdbuf.end);
         // 循环读取消息，直到无消息可读或者缓存满
 
+        // 把有数据的缓存移到头部
+        io::buffer_pullup(&ch->rdbuf);      
         bool buffer_empty = ch->rdbuf.begin == ch->rdbuf.end;  // 当前缓存是否为空
 
         while (1) {
             int    remain = 0;
-            
-            // 把有数据的缓存移到头部，然后计算后面可用空间
-            io::buffer_pullup(&ch->rdbuf);  
+            // 计算剩余空i教案
             remain = ch->rdbuf.size - ch->rdbuf.end;
             
             // 缓存有可用空间，则读取数据
@@ -182,6 +188,8 @@ void channel_event_proc(int fd, int event, void *arg)
                     fprintf(stderr, "[info] channel recv failed, fd:%d\n", fd);
                     bool sok = nio::selector_remove(sel, fd, &err);
                     assert(sok);
+                    is_error = true;
+                    break;  // 退出
                 }
             } else {  // remain == 0
                 // no space for read
@@ -191,18 +199,20 @@ void channel_event_proc(int fd, int event, void *arg)
         } // end while 
 
         // 打印收到的数据
+        fprintf(stderr, "[trace] print message, begin: %d, end: %d \n", ch->rdbuf.begin, ch->rdbuf.end);
         for( int i = ch->rdbuf.begin; i < ch->rdbuf.end; ++i) {
             fputc(ch->rdbuf.data[i], stderr);
         }
-
+        fputc('\n', stderr);
+        
         // 如果缓存有数据, 且收消息前缓存空，则通知写
-        if ( buffer_empty ) {
+        if ( buffer_empty && !is_error ) {
             bool isok = nio::selector_request(sel, fd, nio::select_write, -1, &err);
             assert(isok);
         }
 
-        // 如果缓存满了，就不请求收了，如果缓存没满，继续请求读事件
-        if ( ch->rdbuf.end < ch->rdbuf.size ) {
+        // 如果缓存满了，或者出错了，就不请求收了，如果缓存没满，且继续请求读事件
+        if ( ch->rdbuf.end < ch->rdbuf.size && !is_error ) {
             bool isok = nio::selector_request(sel, fd, nio::select_read, -1, &err);
             assert(isok);
         }
@@ -226,24 +236,23 @@ void channel_event_proc(int fd, int event, void *arg)
                     fprintf(stderr, "[info] channel send failed, fd:%d\n", fd);
                     bool sok = nio::selector_remove(sel, fd, &err);
                     assert(sok);
+                    is_error = true;
                 }
             } else {   // remain == 0 , no data to send
                 break;
             }
         } // end while
 
-        // 当发送前缓存是满的，就请求读，因为缓存满了的时候，read处理过程不会再请求读。
-        if ( ch->rdbuf.end == ch->rdbuf.end ) {
+        // 当发送缓存空了，就取申请读新消息,
+        // 如果发送缓存没空，就继续申请发送
+        if ( ch->rdbuf.begin == ch->rdbuf.end && !is_error ) {
             bool isok = nio::selector_request(sel, fd, nio::select_read, -1, &err);
             assert(isok);
-        }
-
-        // 还没写完，继续请求写，如果写完了，这里就不请求了，需要下次收到了再请求。
-        if ( ch->rdbuf.end > ch->rdbuf.begin) {
+        } else if ( ch->rdbuf.end > ch->rdbuf.begin && !is_error) {
             bool isok = nio::selector_request(sel, fd, nio::select_write, -1, &err);
             assert(isok);
         }
-        
+
     } else if ( event == nio::select_remove) {
 
         fprintf(stderr, "[info] channel will be closed, fd:%d\n", fd);
@@ -253,6 +262,7 @@ void channel_event_proc(int fd, int event, void *arg)
         net::location_free(&ch->remote);
 
         ch->fd = -1;
+        delete ch;
     } else if ( event == nio::select_add ) {
         
         // channel added, wait for reading
@@ -263,6 +273,9 @@ void channel_event_proc(int fd, int event, void *arg)
         fprintf(stderr, "[info] channel wait error, fd:%d\n", fd);
         bool sok = nio::selector_remove(sel, fd, &err);
         assert(sok);
+    } else if ( event & nio::select_timeout ) {
+        fprintf(stderr, "[info] channel wait timeout, fd:%d\n", fd);
+        assert("[info] channel wait timeout" == nullptr);
     } else {
         assert("bad select event" == nullptr);
     }
