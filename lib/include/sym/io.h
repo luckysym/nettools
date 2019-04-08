@@ -11,19 +11,19 @@ namespace io {
     /// IO缓存
     typedef struct buffer {
         char *    data;
-        int       size;
-        int       begin;
-        int       end;
+        size_t    size;
+        size_t    begin;
+        size_t    end;
     } buffer_t;
 
     /// extend the buffer capacity to the new size
-    buffer_t * buffer_alloc(buffer_t *buf, int size);
+    buffer_t * buffer_alloc(buffer_t *buf, size_t size);
 
     /// free the buffer members, release its memory
     void buffer_free(buffer_t *buf);
 
     /// realloc the buffer with the new capacity size.
-    buffer_t * buffer_realloc(buffer_t *buf, int size);
+    buffer_t * buffer_realloc(buffer_t *buf, size_t size);
 
     /// move the data in the buffer to the front
     buffer_t * buffer_pullup(buffer_t *buf);
@@ -41,7 +41,7 @@ void io::buffer_free(io::buffer_t *buf)
 }
 
 inline 
-io::buffer_t * io::buffer_alloc(io::buffer_t *buf, int size)
+io::buffer_t * io::buffer_alloc(io::buffer_t *buf, size_t size)
 {
     if ( size > 0 ) {
         buf->data = (char *)malloc(size);
@@ -49,14 +49,14 @@ io::buffer_t * io::buffer_alloc(io::buffer_t *buf, int size)
     } else {
         buf->data = nullptr;
     }
-    buf->size  = 0;
+    buf->size  = size;
     buf->begin = 0;
     buf->end   = 0;
     return buf;
 }
 
 inline 
-io::buffer_t * io::buffer_realloc(io::buffer_t *buf, int size)
+io::buffer_t * io::buffer_realloc(io::buffer_t *buf, size_t size)
 {
     if ( size == 0 ) {
         io::buffer_free(buf);
@@ -75,7 +75,7 @@ io::buffer_t * io::buffer_pullup(io::buffer_t *buf)
 {
     if ( buf->begin = 0 ) return buf;
 
-    int len = buf->end - buf->begin;
+    size_t len = buf->end - buf->begin;
     void * p = memmove(buf->data, buf->data + buf->begin, len);
     assert(p == buf->data);
     buf->begin -= len;
