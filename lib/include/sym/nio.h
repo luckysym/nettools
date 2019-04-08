@@ -370,7 +370,7 @@ bool nio::selector_request(nio::selector_epoll* sel, int fd, int events, int64_t
 inline 
 int  nio::selector_run(nio::selector_t *sel, err::error_t *err)
 {
-    fprintf(stderr, "selector_run \n");
+    fprintf(stderr, "[trace][nio] selector_run \n");
     // 从请求队列中取出需要处理的事件操作, 先创建一个新的链表，并将requests链表转移到新建的链表，
     // 转移后清空requests，转移过程对requests加锁，这样等于批量获取，避免长时间对requests加锁。
     
@@ -403,7 +403,7 @@ int  nio::selector_run(nio::selector_t *sel, err::error_t *err)
     // 处理超时
     int64_t now = chrono::now();
     auto tnode = sel->timeouts.front;
-    while ( tnode && tnode->value.exp > now ) {  // 第一个没超时，就假设后面的都没超时
+    while ( tnode && tnode->value.exp < now ) {  // 第一个没超时，就假设后面的都没超时
         // 超时了，执行回调，重设epoll, 踢出队列.
         //
         sel_item_t *p = sel->items.values + tnode->value.fd;
@@ -570,7 +570,7 @@ bool selector_run_internal(selector_epoll *sel, err::error_t *e)
     
     // epoll wait
     int r = epoll_wait(sel->epfd, sel->events.values, sel->events.size, timeout);
-    if ( r > 0 ) {
+    if ( r >= 0 ) {
         for( int i = 0; i < r; ++i ) {
             epoll_event * evt = sel->events.values + i;
             int fd = evt->data.fd;
@@ -622,8 +622,9 @@ bool selector_run_internal(selector_epoll *sel, err::error_t *e)
             int c = epoll_ctl(sel->epfd, EPOLL_CTL_MOD, fd, &evt1);
             assert(c == 0);
         }
+    } else {
+        if ( errno != EINTR )  assert("epoll_wait error" == nullptr);
     }
-    assert( r >= 0);
     return r;
 }
 
