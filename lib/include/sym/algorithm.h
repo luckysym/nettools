@@ -123,9 +123,16 @@ basic_dlink_node<T> * dlinklist_push_back(basic_dlink_list<T> * lst, basic_dlink
 {
     node->prev = lst->back;
     node->next = nullptr;
-    if ( lst->back ) lst->back->next = node;
-    else lst->back = lst->front = node;
+    if ( lst->back ) {
+        lst->back->next = node;
+        lst->back = node;
+    }
+    else {
+        lst->back  = node; 
+        lst->front = node;
+    }
     ++lst->size;
+
     return node;
 }
 
@@ -134,10 +141,15 @@ basic_dlink_node<T> * dlinklist_pop_front(basic_dlink_list<T> * lst)
 {
     auto p = lst->front;
     if ( p ) {
-        if ( p->next ) p->next->prev = nullptr;
-        p->next = nullptr;
+        lst->front = lst->front->next;
         --lst->size;
+
         if ( lst->size == 0 ) lst->front = lst->back = nullptr;
+        else lst->front->prev = nullptr;
+        
+        p->prev = nullptr;
+        p->next = nullptr;
+
     }
     return p;
 }
