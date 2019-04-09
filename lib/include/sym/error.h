@@ -18,7 +18,25 @@ namespace err {
     /// push error info to the error object
     void push_error_info(error_t * err, int size, const char * format, ...);
 
+    void trace_stderr(const char * file, int line, const char * format, ...);
+
 } // end namespace sl
+
+#define SYM_TRACE(msg) err::trace_stderr(__FILE__, __LINE__, msg) 
+#define SYM_TRACE_VA(fmt, ...) err::trace_stderr(__FILE__, __LINE__, fmt, __VA_ARGS__) 
+
+inline
+void err::trace_stderr(const char * file, int line, const char * format, ...)
+{
+    printf("%s:%d ", file, line);
+
+    va_list ap;
+    va_start(ap, format);
+    int n = vprintf(format, ap);
+    va_end(ap);
+
+    printf("\n");
+}
 
 inline 
 void err::init_error_info(err::error_info * err)
