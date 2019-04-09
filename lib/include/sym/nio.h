@@ -303,7 +303,7 @@ bool nio::selector_add(nio::selector_t * sel, int fd, selector_event_calback cb,
     int r = write(sel->evfd, &n, sizeof(n));   // 通知event fd
     assert( r > 0);
 
-    fprintf(stderr, "[trace][nio] selector_add, fd: %d\n", fd);
+    SYM_TRACE_VA("[trace][nio] selector_add, fd: %d\n", fd);
 
     return true;
 }
@@ -331,7 +331,7 @@ bool nio::selector_remove(nio::selector_t * sel, int fd, err::error_t *err)
     int r = write(sel->evfd, &n, sizeof(n));   // 通知event fd
     assert( r > 0);
 
-    fprintf(stderr, "[trace][nio] selector_remove, fd: %d\n", fd);
+    SYM_TRACE_VA("[trace][nio] selector_remove, fd: %d\n", fd);
 
     return true;
 }
@@ -362,7 +362,8 @@ bool nio::selector_request(nio::selector_epoll* sel, int fd, int events, int64_t
     int r = write(sel->evfd, &n, sizeof(n));   // 通知event fd
     assert( r > 0);
 
-    fprintf(stderr, "[trace][nio] selector_request, fd: %d, ops: %d\n", fd, events);
+
+    SYM_TRACE_VA("[trace][nio] selector_request, fd: %d, ops: %d\n", fd, events);
 
     return true;
 }
@@ -370,7 +371,8 @@ bool nio::selector_request(nio::selector_epoll* sel, int fd, int events, int64_t
 inline 
 int  nio::selector_run(nio::selector_t *sel, err::error_t *err)
 {
-    fprintf(stderr, "[trace][nio] selector_run \n");
+    SYM_TRACE("[trace][nio] selector_run \n");
+
     // 从请求队列中取出需要处理的事件操作, 先创建一个新的链表，并将requests链表转移到新建的链表，
     // 转移后清空requests，转移过程对requests加锁，这样等于批量获取，避免长时间对requests加锁。
     
@@ -467,7 +469,7 @@ sel_item_t * selector_add_internal(selector_epoll *sel, sel_oper_t *oper, err::e
     sel->count += 1;
     array_realloc(&sel->events, sel->count + 1);  // 还有一个是event fd
     
-    fprintf(stderr, "[trace][nio] selector_add_internal, fd:%d\n", oper->fd);
+    SYM_TRACE_VA("[trace][nio] selector_add_internal, fd:%d\n", oper->fd);
 
     return p;
 }
@@ -506,7 +508,7 @@ bool selector_remove_internal(selector_epoll * sel, sel_oper_t *oper, err::error
     sel->count -= 1;
     array_realloc(&sel->events, sel->count + 1); // 还有一个event fd
 
-    fprintf(stderr, "[trace][nio] selector_remove_internal, fd:%d, ops: %d\n", oper->fd, oper->ops);
+    SYM_TRACE_VA("[trace][nio] selector_remove_internal, fd:%d, ops: %d\n", oper->fd, oper->ops);
     return true;
 }
 
@@ -544,7 +546,7 @@ bool selector_request_internal(selector_epoll *sel, sel_oper_t *oper, err::error
     int r = epoll_ctl(sel->epfd, EPOLL_CTL_MOD, p->fd, &ev);
     assert(r == 0);
 
-    fprintf(stderr, "[trace][nio] selector_request_internal, fd:%d, ops: %d\n", oper->fd, oper->ops);
+    SYM_TRACE_VA("[trace][nio] selector_request_internal, fd:%d, ops: %d\n", oper->fd, oper->ops);
 
     return true;
 }
@@ -562,10 +564,10 @@ bool selector_run_internal(selector_epoll *sel, err::error_t *e)
         auto tn = sel->timeouts.front;
         if ( tn->value.exp != INT64_MAX && tn->value.exp > now ) 
             timeout = (int)((tn->value.exp - now) / 1000);
-        fprintf(stderr, "[trace][nio] begin epoll_wait, timeout %d, exp: %lld now %lld\n", 
+        SYM_TRACE_VA("[trace][nio] begin epoll_wait, timeout %d, exp: %lld now %lld\n", 
             timeout, tn->value.exp, now);
     } else {
-        fprintf(stderr, "[trace][nio] begin epoll_wait, no timeout %d\n", timeout);
+        SYM_TRACE_VA("[trace][nio] begin epoll_wait, no timeout %d\n", timeout);
     }
     
     // epoll wait
@@ -576,7 +578,7 @@ bool selector_run_internal(selector_epoll *sel, err::error_t *e)
             int fd = evt->data.fd;
 
             if ( fd == sel->evfd ) {
-                fprintf(stderr, "[trace][nio] epoll_wait, event fd notified, fd: %d\n", fd);
+                SYM_TRACE_VA("[trace][nio] epoll_wait, event fd notified, fd: %d\n", fd);
                 if ( evt->events == EPOLLIN) {
                     int64_t n;
                     int r = read(sel->evfd, &n, sizeof(n));
