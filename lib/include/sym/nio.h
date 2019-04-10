@@ -1,10 +1,16 @@
 #pragma once 
 
 #include <sym/error.h>
+#include <sym/chrono.h>
+#include <sym/algorithm.h>
 
 #include <sys/epoll.h>
 #include <sys/eventfd.h>
 #include <pthread.h>
+#include <errno.h>
+#include <unistd.h>
+#include <assert.h>
+#include <string.h>
 
 /// namespace for multi-thread 
 namespace mt {
@@ -90,7 +96,7 @@ namespace nio
     const int selopt_thread_safe = 1;  ///< selector support multi-thread
 
     /// selector event callback function type
-    typedef void (*selector_event_calback)(int fd, int event, void *arg);
+    typedef void (*selector_event_proc)(int fd, int event, void *arg);
 
     /// 事件超时设置节点
     typedef struct select_expiration {
@@ -104,7 +110,7 @@ namespace nio
     typedef struct select_item {
         int    fd;
         int    events;    ///< current requested epoll events
-        selector_event_calback  callback;
+        selector_event_proc  callback;
         void   *arg;
         sel_expire_node rd;
         sel_expire_node wr; 
@@ -115,7 +121,7 @@ namespace nio
         int     fd;
         int     ops;  ///< requested operation events
         int64_t expire;
-        selector_event_calback  callback;
+        selector_event_proc  callback;
         void   *arg;
     } sel_oper_t;
     typedef alg::basic_dlink_node<sel_oper_t> sel_oper_node;
@@ -152,7 +158,7 @@ namespace nio
     bool selector_destroy(selector_t *sel, err::error_t *err);
 
     /// add a socket fd and its callback function to the selector.
-    bool selector_add(selector_t * sel, int fd, selector_event_calback cb, void *arg, err::error_t *err);
+    bool selector_add(selector_t * sel, int fd, selector_event_proc cb, void *arg, err::error_t *err);
 
     /// remove socket from selector
     bool selector_remove(selector_t * sel, int fd, err::error_t *err);
@@ -279,7 +285,7 @@ bool nio::selector_destroy(nio::selector_t *sel, err::error_t *err)
 } 
 
 inline 
-bool nio::selector_add(nio::selector_t * sel, int fd, selector_event_calback cb, void *arg, err::error_t *err)
+bool nio::selector_add(nio::selector_t * sel, int fd, selector_event_proc cb, void *arg, err::error_t *err)
 {
     sel_oper_node * node = (sel_oper_node *)malloc(sizeof(sel_oper_node));
     node->value.fd = fd;

@@ -140,12 +140,16 @@ net::location * net::location_from_url(struct net::location * loc, const char * 
 {
         // 解析protocol
         const char * proto = url;
+        int proto_len = 0;
         char * p0 = ::strstr((char*)proto, "://");
-        if ( !p0 ) return nullptr;
-        int proto_len = p0 - proto;
-        
+        if ( !p0 ) {
+            proto = nullptr;
+        } else {
+            proto_len = p0 - proto;
+        }
+
         // 解析host
-        const char * host = p0 + 3;
+        const char * host = p0?(p0 + 3):url;
         int host_len;
         while ( *host == ' ' ) ++host;
         if ( *host == '[')  {
@@ -170,6 +174,8 @@ net::location * net::location_from_url(struct net::location * loc, const char * 
             loc->proto = (char *)malloc(proto_len + 1);
             memcpy(loc->proto, proto, proto_len);
             loc->proto[proto_len] = '\0';
+        } else {
+            loc->proto = nullptr;
         }
         if ( host ) {
             loc->host = (char*)malloc(host_len + 1);
@@ -191,6 +197,7 @@ int net::socket_open_channel(const net::location * loc, int options, err::error_
         if ( err ) err::push_error_info(err, 128, "bad socket protocol name: %s", loc->proto);
         return -1;
     }
+    if ( attr.type == SOCK_RAW ) attr.type = SOCK_STREAM;  // 没有指定默认是流
 
     // init socket address
     char addrbuf[128];
@@ -204,8 +211,8 @@ int net::socket_open_channel(const net::location * loc, int options, err::error_
         }
         err::free_error_info(&e2);
         return -1;
-        
     }
+    if (attr.af != paddr->sa_family ) attr.af = paddr->sa_family; // socket的af以找到的地址为准，attr.af有可能是unspec
 
     // create socket
     int nonblock = (options & sockopt_nonblocked)?SOCK_NONBLOCK:0;
@@ -450,7 +457,7 @@ socklen_t net::sockaddr_from_location(sockaddr *paddr, socklen_t len, const loca
         if ( attr.af == AF_INET) addrlen = sizeof(sockaddr_in);
         else if ( attr.af == AF_INET6 ) addrlen = sizeof( sockaddr_in6);
         else if ( attr.af == AF_UNIX ) addrlen = sizeof( sockaddr_un);
-        else assert(false);    
+        else assert(false);
     }
     
     ((sockaddr_in*)paddr)->sin_port = htons(loc->port);   // 设置端口，in和in6端口字段位置相同
@@ -461,7 +468,10 @@ inline
 net::socket_attrib * net::sockattr_from_protocol(net::socket_attrib * attr, const char * name)
 {
     attr->proto = 0;
-    if ( 0 == strcmp(name, "tcp") || 0 == strcmp(name, "tcp4") ) {
+    if ( name == nullptr ) {
+        attr->af = AF_UNSPEC;
+        attr->type = SOCK_RAW;
+    } else if ( 0 == strcmp(name, "tcp") || 0 == strcmp(name, "tcp4") ) {
         attr->af   = AF_INET;
         attr->type = SOCK_STREAM;
     } else if ( 0 == strcmp(name, "udp") || 0 == strcmp(name, "udp4") ) {
@@ -492,6 +502,7 @@ int net::socket_open_listener(const net::location *local, int options, err::erro
         if ( err ) err::push_error_info(err, 128, "bad socket protocol name: %s", local->proto);
         return -1;
     }
+    attr.type = SOCK_STREAM;  // listener则必须是stream
 
     // init socket address
     char addrbuf[128];
@@ -505,8 +516,8 @@ int net::socket_open_listener(const net::location *local, int options, err::erro
         }
         err::free_error_info(&e2);
         return -1;
-        
     }
+    if ( attr.af != paddr->sa_family ) attr.af = paddr->sa_family;
 
     // create socket
     int nonblock = (options & sockopt_nonblocked)?SOCK_NONBLOCK:0;
