@@ -85,9 +85,9 @@ namespace net {
     /// or return -1 if any error occured, include remote resets the connection.
     int socket_recv(int fd, char *data, int len, err::error_info *err);
 
-    /// create and open a remote socket channel to the remote location, and returns the socket fd.
+    /// create and open a stream socket to the remote location, and returns the socket fd.
     /// returns -1 if failed.
-    int socket_open_channel(const location *remote, int options, err::error_info * err);
+    int socket_open_stream(const location *remote, int options, err::error_info * err);
 
     /// open a local socket listener, return the socket fd or -1 if failed.
     int socket_open_listener(const location *local, int options, err::error_info *err);
@@ -188,7 +188,7 @@ net::location * net::location_from_url(struct net::location * loc, const char * 
 }
 
 inline 
-int net::socket_open_channel(const net::location * loc, int options, err::error_info * err)
+int net::socket_open_stream(const net::location * loc, int options, err::error_info * err)
 {
     // init socket attributes
     sockattr_t attr;
@@ -197,7 +197,7 @@ int net::socket_open_channel(const net::location * loc, int options, err::error_
         if ( err ) err::push_error_info(err, 128, "bad socket protocol name: %s", loc->proto);
         return -1;
     }
-    if ( attr.type == SOCK_RAW ) attr.type = SOCK_STREAM;  // 没有指定默认是流
+    attr.type = SOCK_STREAM;  // 当前channel必然面向连接
 
     // init socket address
     char addrbuf[128];
@@ -486,6 +486,12 @@ net::socket_attrib * net::sockattr_from_protocol(net::socket_attrib * attr, cons
     } else if ( 0 == strcmp(name, "unix") ) {
         attr->af   = AF_UNIX;
         attr->type = SOCK_STREAM;
+    } else if ( 0 == strcmp(name, "ip") ) {
+        attr->af   = AF_INET;
+        attr->type = SOCK_RAW;
+    } else if ( 0 == strcmp(name, "ip6") ) {
+        attr->af   = AF_INET6;
+        attr->type = SOCK_RAW;
     } else {
         return nullptr;
     }
