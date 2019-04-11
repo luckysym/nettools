@@ -164,10 +164,16 @@ net::location * net::location_from_url(struct net::location * loc, const char * 
         else host_len = ::strlen(host);
 
         // 解析port
-        const char * port = (*p0 == ':')?(p0 + 1):nullptr;
+        const char * port = nullptr; 
+        if ( p0 ) port = (*p0 == ':')?(p0 + 1):nullptr;
 
         // 解析path
-        const char * path = (*p0 == '/')?p0:nullptr;
+        const char * path;
+        if ( port ) path = strchr(port, '/');
+        else if ( host ) path = strchr(host, '/');
+        else if (proto) path = strchr(proto + proto_len + 3, '/');
+        else if ( url[0] == '/') path = url;
+        else path == nullptr;
 
         location_free(loc);
         if ( proto ) {
