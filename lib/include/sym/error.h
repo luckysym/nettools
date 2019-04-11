@@ -3,6 +3,7 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 namespace err {
     typedef struct error_info {
@@ -29,7 +30,10 @@ namespace err {
 inline
 void err::trace_stderr(const char * file, int line, const char * format, ...)
 {
-    printf("%s:%d ", file, line);
+    char * file1 = strrchr((char *)file , '/');
+    if ( file1 == nullptr ) file1 = (char*)file;
+    else file1 += 1;
+    printf("%s:%d ", file1, line);
 
     va_list ap;
     va_start(ap, format);
