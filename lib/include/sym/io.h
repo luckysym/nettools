@@ -16,6 +16,9 @@ namespace io {
         size_t    end;
     } buffer_t;
 
+    /// init the buffer struct
+    buffer_t * buffer_init(buffer_t *buf);
+
     /// extend the buffer capacity to the new size
     buffer_t * buffer_alloc(buffer_t *buf, size_t size);
 
@@ -29,6 +32,14 @@ namespace io {
     buffer_t * buffer_pullup(buffer_t *buf);
 
 } // end namespace io
+
+inline 
+io::buffer_t * io::buffer_init(io::buffer_t *buf)
+{
+    buf->data = nullptr;
+    buf->size = buf->begin = buf->end = 0;
+    return buf;
+}
 
 inline 
 void io::buffer_free(io::buffer_t *buf) 
