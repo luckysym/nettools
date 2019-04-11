@@ -30,7 +30,7 @@ int main(int argc, char **argv)
     // open socket channel
     int opts = net::sockopt_tcp_nodelay | net::sockopt_linger | net::sockopt_nonblocked;
     
-    int fd = net::socket_open_channel(&loc, opts, &err);
+    int fd = net::socket_open_stream(&loc, opts, &err);
     if ( fd == -1 ) {
         fprintf(stderr, "[error] failed to open socket channel, %s\n", err.str);
         err::free_error_info(&err);
