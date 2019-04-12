@@ -2,7 +2,7 @@
 
 #include <pthread.h>
 
-/// namespace for multi-thread 
+/// 多线程相关操作的名称空间。 
 namespace mt {
     typedef pthread_mutex_t mutex_t;
 

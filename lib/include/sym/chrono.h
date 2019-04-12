@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include <sys/time.h>
 
+/// 包含时钟相关操作的名称空间。
 namespace chrono
 {
     int64_t now();

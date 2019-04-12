@@ -1,12 +1,10 @@
-/**
- * 本文件声明了基本IO操作所需的数据结构和函数。
- */
 #pragma once 
 
 #include <stdlib.h>
 #include <assert.h>
 #include <memory.h>
 
+/// 包含基本IO操作和数据结构的名称空间。
 namespace io {
     /// IO缓存
     typedef struct buffer {

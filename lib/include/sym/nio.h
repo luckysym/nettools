@@ -12,6 +12,7 @@
 #include <assert.h>
 #include <string.h>
 
+/// 包含同步非阻塞IO相关操作的名称空间。
 namespace nio
 {
     const int select_none    = 0;

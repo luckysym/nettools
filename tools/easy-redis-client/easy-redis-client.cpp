@@ -31,12 +31,12 @@ typedef alg::basic_dlink_list<niobuffer_t> buffer_queue_t;
 
 struct nio_channel {
     int                 fd;
-    int                 state;   // channel_state_*
-    selector_t *        sel;
-    channel_io_proc     iocb;
-    void *              arg;
-    buffer_queue_t      wrbufs;  // outbound buffer queue
-    buffer_queue_t      rdbufs;  // inbound buffer queue
+    int                 state;   ///< 当前channel状态，取值channel_state_*。
+    selector_t *        sel;     ///< 当前channel关联的事件选择器。
+    channel_io_proc     iocb;    ///< io回调函数。
+    void *              arg;     ///< 在iocb调用时输出的用户自定义参数，在channel_init时指定。
+    buffer_queue_t      wrbufs;  ///< 发送缓存队列。
+    buffer_queue_t      rdbufs;  ///< 接收缓存队列。
 };
 
 inline 
@@ -73,7 +73,10 @@ void channel_event_callback(int fd, int events, void *arg) {
             pn = alg::dlinklist_pop_front(&ch->rdbufs);
             ch->iocb(ch, channel_event_received, &pn->value.buf, ch->arg);
             free(pn);
-        } else {
+        }
+
+        /// 如果接收缓存队列里还有需要接收消息的缓存，继续请求读事件。
+        if ( ch->rdbufs.front )
             bool isok = selector_request(ch->sel, ch->fd, select_read, pn->value.exp, &err);
             assert(isok);
         }

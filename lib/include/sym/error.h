@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+/// 包含异常错误以及过程跟踪相关数据结构和操作的名称空间。
 namespace err {
     typedef struct error_info {
         char * str;
@@ -24,6 +25,8 @@ namespace err {
 
 } // end namespace sl
 
+/// \def SYM_TRACE(msg)
+/// 用于输出过程跟踪信息。
 #define SYM_TRACE(msg) err::trace_stderr(__FILE__, __LINE__, msg) 
 #define SYM_TRACE_VA(fmt, ...) err::trace_stderr(__FILE__, __LINE__, fmt, __VA_ARGS__) 
 

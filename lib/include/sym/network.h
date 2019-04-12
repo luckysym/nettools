@@ -22,6 +22,7 @@
 #define UNIX_PATH_MAX 108
 #endif
 
+/// 包含网络及socket相关操作的名称空间。
 namespace net {
     
     // socket options bit flags
