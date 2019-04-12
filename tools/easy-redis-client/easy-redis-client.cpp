@@ -15,7 +15,12 @@ const int channel_event_connected = 4;
 const int channel_event_accepted  = 8;
 const int channel_event_error     = 128;
 
+const int channel_shut_read  = 1;
+const int channel_shut_write = 2;
+const int channel_shut_both  =  channel_shut_read | channel_shut_write;
+
 const int nio_flag_exact_size = 1;    ///< exact size for receiving or sending
+
 
 typedef struct nio_channel channel_t;
 typedef void (*channel_io_proc)(channel_t * ch, int event, void *io, void *arg);
@@ -76,7 +81,7 @@ void channel_event_callback(int fd, int events, void *arg) {
         }
 
         /// 如果接收缓存队列里还有需要接收消息的缓存，继续请求读事件。
-        if ( ch->rdbufs.front )
+        if ( ch->rdbufs.front ) {
             bool isok = selector_request(ch->sel, ch->fd, select_read, pn->value.exp, &err);
             assert(isok);
         }
@@ -103,7 +108,12 @@ bool channel_init(channel_t * ch, nio::selector_t *sel, channel_io_proc cb, void
     return true;
 }
 
-bool channel_destroy(channel_t *ch, err::error_t *e) 
+bool channel_shutdown(channel_t *ch, int how, err::error_t *e)
+{
+    assert("channel_shutdown" == nullptr);
+}
+
+bool channel_close(channel_t *ch, err::error_t *e) 
 {
     assert("channel_destroy" == nullptr);
 }
@@ -223,13 +233,9 @@ void redis_channel_callback(nio::channel_t *ch, int event, void *io, void *arg) 
 
     if ( event == nio::channel_event_connected ) {
         fprintf(stderr, "connected \n");
-        if ( G_seq == 0 ) {
-            const char *cmd = "set abc 123456\r\n";
-            isok = nio::channel_sendn_async(ch, cmd, strlen(cmd), -1, &err);
-            assert(isok);
-        } else {
-            assert("redis_channel_callback seq" == nullptr);    
-        }
+        const char *cmd = "set abc 123456\r\n";
+        isok = nio::channel_sendn_async(ch, cmd, strlen(cmd), -1, &err);
+        assert(isok);
     } 
     else if ( event == nio::channel_event_sent ) {
         char * buf = (char *)malloc(128);
@@ -241,6 +247,15 @@ void redis_channel_callback(nio::channel_t *ch, int event, void *io, void *arg) 
         assert(buf);
         fprintf(stderr, "%s", buf->data);
         free(buf->data);
+        G_seq += 1;
+        if ( G_seq == 1) {
+            const char *cmd = "get abc\r\n";
+            isok = nio::channel_sendn_async(ch, cmd, strlen(cmd), -1, &err);
+            assert(isok);
+        } else {
+            G_stop = 1;
+            nio::selector_notify(ch->sel, &err);
+        }
     }
     else {
         assert("redis_channel_callback" == nullptr);
@@ -282,7 +297,8 @@ int main(int argc, char **argv)
         assert(isok);
     }
     
-    channel_destroy(&ch, nullptr);
+    channel_shutdown(&ch, channel_shut_both, nullptr);
+    channel_close(&ch, nullptr);
     
     return 0;
 }

@@ -102,8 +102,6 @@ namespace net {
     bool socket_close(int fd, struct err::error_info *err);
 } // end namespace net 
 
-
-
 inline 
 net::location * net::location_init(net::location *loc)
 {

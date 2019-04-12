@@ -15,14 +15,14 @@
 /// 包含同步非阻塞IO相关操作的名称空间。
 namespace nio
 {
-    const int select_none    = 0;
-    const int select_read    = 1;
-    const int select_write   = 2;
-    const int select_timeout = 4;
-    const int select_error   = 8;
-    const int select_add     = 16;
-    const int select_remove  = 23;
-
+    const int select_none     = 0;
+    const int select_read     = 1;
+    const int select_write    = 2;
+    const int select_timeout  = 4;
+    const int select_error    = 8;
+    const int select_add      = 16;
+    const int select_remove   = 32;
+    
     const int init_list_size = 128;  ///< 列表初始化大小
     const int selopt_thread_safe = 1;  ///< selector support multi-thread
 
@@ -96,6 +96,9 @@ namespace nio
 
     /// request events.
     bool selector_request(selector_t * sel, int fd, int events, int64_t expire, err::error_t *err);
+
+    /// notify the selector waking up
+    bool selector_notify(selector_t * sel, err::error_t *err);
 
     /// run the selector
     int  selector_run(selector_t *sel, err::error_t *err);
@@ -270,6 +273,15 @@ bool nio::selector_remove(nio::selector_t * sel, int fd, err::error_t *err)
 
     SYM_TRACE_VA("[trace][nio] selector_remove, fd: %d\n", fd);
 
+    return true;
+}
+
+inline 
+bool nio::selector_notify(nio::selector_epoll* sel, err::error_t *err)
+{
+    int64_t n = 1;
+    int r = write(sel->evfd, &n, sizeof(n));
+    assert(r > 0 );
     return true;
 }
 
