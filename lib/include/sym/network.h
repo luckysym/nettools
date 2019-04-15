@@ -31,6 +31,10 @@ namespace net {
     const int sockopt_reuseaddr   = 4;
     const int sockopt_tcp_nodelay = 8;
 
+    const int sock_shut_read = SHUT_RD;
+    const int sock_shut_write = SHUT_WR;
+    const int sock_shut_both  = SHUT_RDWR;
+
     typedef struct socket_attrib {
         int af;
         int type;
@@ -97,6 +101,9 @@ namespace net {
     /// if -1 returned, check the output error, if err->str is null, means no more channel could be accept,
     /// and if err->str is not null, means accept is error. 
     int socket_accept(int sfd, int sockopts, location_t *remote, err::error_t *err);
+
+    /// shutdown the socket.
+    bool socket_shutdown(int fd, int how, err::error_t *e);
 
     /// close socket fd. returns true if success. 
     bool socket_close(int fd, struct err::error_info *err);
@@ -501,6 +508,18 @@ net::socket_attrib * net::sockattr_from_protocol(net::socket_attrib * attr, cons
         return nullptr;
     }
     return attr;
+}
+inline 
+bool net::socket_shutdown(int fd, int how, err::error_t *e)
+{
+    int r = ::shutdown(fd, how);
+    if ( r == -1 ) {
+        if ( e ) err::push_error_info(e, 128, 
+            "socket_shutdown failed, fd:%d, how: %d, err: %d, %s", 
+            fd, how, errno, strerror(errno));
+        return false;
+    }
+    return true;
 }
 
 inline

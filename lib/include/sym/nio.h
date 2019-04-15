@@ -4,6 +4,8 @@
 #include <sym/chrono.h>
 #include <sym/algorithm.h>
 #include <sym/thread.h>
+#include <sym/network.h>
+#include <sym/io.h>
 
 #include <sys/epoll.h>
 #include <sys/eventfd.h>
@@ -111,6 +113,56 @@ namespace nio
         bool selector_run_internal(selector_epoll *sel, err::error_t *e);
 
     } // end namespace detail
+
+
+    const int channel_state_closed  = 0;    ///< nio channel state closed
+    const int channel_state_opening = 1;    ///< nio channel state opening
+    const int channel_state_open    = 2;    ///< nio channel state open
+    const int channel_state_closing = 3;    ///< nio channel state closing
+
+    const int channel_event_received  = 1;
+    const int channel_event_sent      = 2;
+    const int channel_event_connected = 4;
+    const int channel_event_accepted  = 8;
+    const int channel_event_closed    = 16;
+    const int channel_event_error     = 128;
+
+    const int channel_shut_read  = net::sock_shut_read;
+    const int channel_shut_write = net::sock_shut_write;
+    const int channel_shut_both  = net::sock_shut_both;
+
+    const int nio_flag_exact_size = 1;    ///< exact size for receiving or sending
+
+    typedef struct nio_channel channel_t; ///< nio channel  type
+
+    /// nio channel io event calllback function type
+    typedef void (*channel_io_proc)(channel_t * ch, int event, void *io, void *arg);
+
+    /// nio buffer structure
+    typedef struct nio_buffer {
+        io::buffer_t buf;
+        int          flags;
+        int64_t      exp;
+    } niobuffer_t;
+
+    /// nio buffer node type
+    typedef alg::basic_dlink_node<niobuffer_t> buffer_node_t;
+
+    /// nio buffer queue type
+    typedef alg::basic_dlink_list<niobuffer_t> buffer_queue_t;
+
+    /// nio channel structure
+    struct nio_channel {
+        int                 fd;
+        int                 state;   ///< 当前channel状态，取值channel_state_*。
+        selector_t *        sel;     ///< 当前channel关联的事件选择器。
+        channel_io_proc     iocb;    ///< io回调函数。
+        void *              arg;     ///< 在iocb调用时输出的用户自定义参数，在channel_init时指定。
+        buffer_queue_t      wrbufs;  ///< 发送缓存队列。
+        buffer_queue_t      rdbufs;  ///< 接收缓存队列。
+    };
+
+
 } // end namespace nio
 
 inline 
