@@ -94,8 +94,11 @@ namespace nio
     };
     typedef struct selector_epoll selector_t;
 
-    /// create and return a selector, returns null if failed
+    /// init and return the selector, returns null if failed
     selector_t * selector_init(selector_t *sel, int options, err::error_t *err);
+
+    /// init and return the selector, with custom event dispatcher
+    selector_t * selector_init(selector_t *sel, int options, selector_dispatch_proc disp, void *disparg, err::error_t *err);
 
     /// destroy the selector created by selector_create
     bool selector_destroy(selector_t *sel, err::error_t *err);
@@ -213,6 +216,12 @@ namespace nio
 inline 
 nio::selector_t * nio::selector_init(nio::selector_t *sel, int options, err::error_t *err)
 {
+    return selector_init(sel, options, detail::selector_sync_dispatcher, nullptr, err);
+} // end nio::selector_init
+
+inline 
+nio::selector_t * nio::selector_init(selector_t * sel, int options, selector_dispatch_proc disp, void *disparg, err::error_t * err)
+{
     // 成员初始化
     sel->count = 0;
     alg::dlinklist_init(&sel->requests);
@@ -225,8 +234,8 @@ nio::selector_t * nio::selector_init(nio::selector_t *sel, int options, err::err
     sel->events.size   = 0;
 
     sel->reqlock = nullptr;
-    sel->disp = detail::selector_sync_dispatcher;
-    sel->disparg = nullptr;
+    sel->disp = disp;
+    sel->disparg = disparg;
 
     // create epoll fd
     sel->epfd = epoll_create1(EPOLL_CLOEXEC);
@@ -266,7 +275,7 @@ nio::selector_t * nio::selector_init(nio::selector_t *sel, int options, err::err
     }
 
     return sel;
-} // end nio::selector_init
+} // end selector_init
 
 inline 
 bool nio::selector_destroy(nio::selector_t *sel, err::error_t *err)
