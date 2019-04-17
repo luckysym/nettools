@@ -84,6 +84,7 @@ namespace nio
         sel_oper_list     requests;  ///< request operation queue
         sel_item_array    items;     ///< registered items
         sel_expire_list   timeouts;  ///< timeout queue
+        int               def_wait;  ///< default wait timeout
         int               count;     ///< total fd registered in epoll, event fd not involved
         selector_dispatch_proc  disp;  ///< event dispatcher
         void *            disparg;   ///< argument of disp proc
@@ -236,6 +237,8 @@ nio::selector_t * nio::selector_init(selector_t * sel, int options, selector_dis
     sel->reqlock = nullptr;
     sel->disp = disp;
     sel->disparg = disparg;
+
+    sel->def_wait = -1; //  default wait time, unlimited
 
     // create epoll fd
     sel->epfd = epoll_create1(EPOLL_CLOEXEC);
@@ -619,7 +622,7 @@ bool selector_run_internal(selector_epoll *sel, err::error_t *e)
 
     // 计算超时时间。从超时队列获取第一个节点。如果第一个节点已经超时，超时时间设为0.
 
-    int timeout = -1;
+    int timeout = sel->def_wait;
     if ( sel->timeouts.front ) {
         int64_t now = chrono::now();
         auto tn = sel->timeouts.front;
@@ -744,16 +747,33 @@ namespace nio
     bool channel_open_async(channel_t *ch, net::location_t * remote, err::error_t * err) 
     {
         assert( ch->fd == -1);
-        int fd = net::socket_open_stream(remote, net::sockopt_nonblocked, err);
-        if ( fd == -1 ) return false;
+        err::error_t e;
+        err::init_error_info(&e);
+        int fd = net::socket_open_stream(remote, net::sockopt_nonblocked, &e);
+        if ( fd == -1 ) {
+            // connect failed
+            SYM_TRACE_VA("connect failed: %s", e.str);
+            if ( err ) err::move_error_info(err, &e);
+            else err::free_error_info(&e);
+            return false;
+        } else if ( e.str != nullptr ) {
+            // connect in progress
+            ch->state = channel_state_opening;
+            err::free_error_info(&e);
+            SYM_TRACE("connect in progress");
+        } else {
+            // channel open succeeded
+            ch->state = channel_state_open;
+        }
 
         ch->fd = fd;
-        ch->state = channel_state_opening;
         bool isok = selector_add(ch->sel, fd, detail::channel_event_callback, ch, err);
         assert( isok );
 
-        isok = selector_request(ch->sel, fd, select_write, -1, err);
-        assert(isok);
+        if ( ch->state == channel_state_opening ) {
+            isok = selector_request(ch->sel, fd, select_write, -1, err);
+            assert(isok);
+        }
         return isok;
     }
 
@@ -953,6 +973,16 @@ namespace detail {
         }
         else if ( events == select_add ) {
             // added
+        }
+        else if ( events == select_error ) {
+            if ( ch->state == channel_state_opening ) {
+                // failed to open socket
+                int event = channel_event_connected | channel_event_error;
+                ch->state = channel_state_closed;
+                ch->iocb(ch, event, nullptr, ch->arg);
+            } else {
+                assert("channel_event_callback error" == nullptr);
+            }
         }
         else {
             assert("channel_event_callback event" == nullptr);
