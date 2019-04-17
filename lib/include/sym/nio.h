@@ -25,7 +25,7 @@ namespace nio
     const int select_add      = 16;
     const int select_remove   = 32;
     
-    const int init_list_size = 128;  ///< 列表初始化大小
+    const int init_list_size = 128;    ///< 列表初始化大小
     const int selopt_thread_safe = 1;  ///< selector support multi-thread
 
     /// selector event callback function type
@@ -138,31 +138,54 @@ namespace nio
     /// nio channel io event calllback function type
     typedef void (*channel_io_proc)(channel_t * ch, int event, void *io, void *arg);
 
-    /// nio buffer structure
-    typedef struct nio_buffer {
+    /// nio buffer 结构
+    typedef struct nio_operation {
         io::buffer_t buf;
         int          flags;
         int64_t      exp;
-    } niobuffer_t;
+    } nio_oper_t;
 
-    /// nio buffer node type
-    typedef alg::basic_dlink_node<niobuffer_t> buffer_node_t;
+    /// nio buffer 链表节点类型
+    typedef alg::basic_dlink_node<nio_oper_t> nio_oper_node_t;
 
-    /// nio buffer queue type
-    typedef alg::basic_dlink_list<niobuffer_t> buffer_queue_t;
+    /// nio buffer 队列类型
+    typedef alg::basic_dlink_list<nio_oper_t> nio_oper_queue_t;
 
-    /// nio channel structure
+    /// nio channel结构。
     struct nio_channel {
-        int                 fd;
+        int                 fd;      ///< channel文件描述字。
         int                 state;   ///< 当前channel状态，取值channel_state_*。
         selector_t *        sel;     ///< 当前channel关联的事件选择器。
         channel_io_proc     iocb;    ///< io回调函数。
         void *              arg;     ///< 在iocb调用时输出的用户自定义参数，在channel_init时指定。
-        buffer_queue_t      wrbufs;  ///< 发送缓存队列。
-        buffer_queue_t      rdbufs;  ///< 接收缓存队列。
+        nio_oper_queue_t    wrops;  ///< 发送缓存队列。
+        nio_oper_queue_t    rdops;  ///< 接收缓存队列。
     };
 
+    /// shutdown the channel, how is channel_shut_*.
+    bool channel_shutdown(channel_t *ch, int how, err::error_t *e);
 
+    /// init the channel.
+    bool channel_init(channel_t * ch, nio::selector_t *sel, channel_io_proc cb, void *arg, err::error_t *e);
+
+    /// open a channel asynchronously.
+    bool channel_open_async(channel_t *ch, net::location_t * remote, err::error_t * err);
+
+    /// close the channel synchronously.
+    bool channel_close(channel_t *ch, err::error_t *e);
+
+    /// close the channel asynchronously.
+    bool channel_close_async(channel_t *ch, err::error_t *e);
+
+    /// send data asynchronously with exact size.
+    bool channel_sendn_async(channel_t *ch, const char * buf, int len, int64_t exp, err::error_t * err);
+
+    /// receive any data asynchronously.
+    bool channel_recvsome_async(channel_t *ch, char * buf, int len, int64_t exp, err::error_t * err);
+
+    namespace detail {
+        void channel_event_callback(int fd, int events, void *arg);
+    };
 } // end namespace nio
 
 inline 
@@ -632,3 +655,216 @@ bool selector_run_internal(selector_epoll *sel, err::error_t *e)
 }
 
 }} // end namespace nio::detail
+
+
+namespace nio 
+{
+    inline 
+    bool channel_init(channel_t * ch, nio::selector_t *sel, channel_io_proc cb, void *arg, err::error_t *e) 
+    {
+        ch->fd = -1;
+        ch->sel = sel;
+        ch->iocb = cb;
+        ch->arg  = arg;
+        ch->state = channel_state_closed;
+
+        alg::dlinklist_init(&ch->wrops);
+        alg::dlinklist_init(&ch->rdops);
+        return true;
+    }
+
+    inline
+    bool channel_close_async(channel_t *ch, err::error_t *e) 
+    {
+        bool isok = selector_request(ch->sel, ch->fd, select_remove, -1, e);
+        assert(isok); 
+        return isok;
+    }
+
+    inline
+    bool channel_close(channel_t *ch, err::error_t *e) 
+    {
+        if ( ch->state != channel_state_closed ) {
+            ch->state = channel_state_closed;
+            bool isok = selector_request(ch->sel, ch->fd, select_remove, -1, e);
+            assert(isok);
+            return net::socket_close(ch->fd, e);
+        }
+        return true;
+    }
+
+    inline 
+    bool channel_shutdown(channel_t *ch, int how, err::error_t *e)
+    {
+        return net::socket_shutdown(ch->fd, how, e);
+    }
+
+    inline
+    bool channel_open_async(channel_t *ch, net::location_t * remote, err::error_t * err) 
+    {
+        assert( ch->fd == -1);
+        int fd = net::socket_open_stream(remote, net::sockopt_nonblocked, err);
+        if ( fd == -1 ) return false;
+
+        ch->fd = fd;
+        ch->state = channel_state_opening;
+        bool isok = selector_add(ch->sel, fd, detail::channel_event_callback, ch, err);
+        assert( isok );
+
+        isok = selector_request(ch->sel, fd, select_write, -1, err);
+        assert(isok);
+        return isok;
+    }
+
+
+    inline
+    bool channel_sendn_async(channel_t *ch, const char * buf, int len, int64_t exp, err::error_t * err) 
+    {
+        // try to send first
+        int sr = 0;
+        int total  = 0;
+        do {
+            sr = net::socket_send(ch->fd, buf + total, len, err );
+            if ( sr > 0 ) total += sr;
+        } while ( sr > 0 && total < len);
+
+        SYM_TRACE_VA("channel_sendn_async, %d / %d sent", total, len);
+
+        // send ok, do callback, or wait for writable
+        if ( total == len ) {
+            io::buffer_t obuf;
+            obuf.data = (char *)buf;
+            obuf.begin = obuf.end = obuf.size = len; 
+            ch->iocb(ch, channel_event_sent, &obuf, ch->arg);
+            return true;
+        } else {
+
+            // create a buffer node and push to channel write buffer queue
+            nio_oper_node_t * pn = (nio_oper_node_t*)malloc(sizeof(nio_oper_node_t));
+            io::buffer_init(&pn->value.buf);
+            pn->prev = pn->next = nullptr;
+
+            pn->value.buf.data = (char *)buf;
+            pn->value.buf.size = len;
+            pn->value.buf.begin = total;
+            pn->value.buf.end  = len;
+
+            pn->value.flags = nio_flag_exact_size;
+            pn->value.exp = exp;
+        
+            alg::dlinklist_push_back(&ch->wrops, pn);
+            bool isok = selector_request(ch->sel, ch->fd, select_write, exp, err);
+            return isok;
+        }
+    }
+
+    inline 
+    bool channel_recvsome_async(channel_t *ch, char * buf, int len, int64_t exp, err::error_t * err) 
+    {
+        // try to send first
+        int rr = 0;
+        int total  = 0;
+
+        do {
+            rr = net::socket_recv(ch->fd, buf + total, len, err );
+            if ( rr > 0 ) total += rr;
+        } while ( rr > 0 && total < len );
+
+        SYM_TRACE_VA("channel_recvsome_async, %d / %d sent", total, len);
+
+        // readsome只要收到数据就返回，一个没收到就selecting
+        // 所以只要收到数据或者出错，直接回调；没有收到数据，就申请select
+        if ( total > 0 || rr < 0 ) {
+            io::buffer_t ibuf;
+            ibuf.data = (char *)buf;
+            ibuf.begin = 0;
+            ibuf.end = total;
+            ibuf.size = len;
+
+            int event = channel_event_received;
+            if ( rr < 0 ) event |= channel_event_error;
+            ch->iocb(ch, event, &ibuf, ch->arg);
+
+            return true;
+        } else {
+            // create a buffer node and push to channel read buffer queue
+            nio_oper_node_t * pn = (nio_oper_node_t*)malloc(sizeof(nio_oper_node_t));
+            io::buffer_init(&pn->value.buf);
+            pn->prev = pn->next = nullptr;
+
+            pn->value.buf.data = (char *)buf;
+            pn->value.buf.size = len;
+            pn->value.buf.begin = total;
+            pn->value.buf.end  =  0;
+            pn->value.flags = 0;
+            pn->value.exp = exp;
+        
+            alg::dlinklist_push_back(&ch->rdops, pn);
+            bool isok = selector_request(ch->sel, ch->fd, select_read, exp, err);
+            return isok;
+        }
+    }
+
+namespace detail {
+    inline 
+    void channel_event_callback(int fd, int events, void *arg) {
+        channel_t * ch = (channel_t *)arg;
+        err::error_t err;
+        err::init_error_info(&err);
+
+        if ( events == select_write ) {
+            if ( ch->state == channel_state_opening ) {
+                ch->state = channel_state_open;
+                ch->iocb(ch, channel_event_connected, nullptr, arg);
+            } else {
+                assert("channel_event_callback write state" == nullptr);
+            }
+        }
+        else if ( events == select_read ) {
+            nio_oper_node_t *pn = ch->rdops.front;
+            int n = 0;
+            int t = 0;
+            int len =  pn->value.buf.size - pn->value.buf.end;
+
+            do {
+                char * ptr = pn->value.buf.data + pn->value.buf.end + t;
+                int sz = pn->value.buf.size - pn->value.buf.end - t;
+                n = net::socket_recv(ch->fd, ptr, sz, &err);
+                if ( n > 0 ) t += n;
+            } while ( n > 0 && t < len);
+
+            pn->value.buf.end += t;  // 总收到t个字节，end游标后移
+            
+            // 全部收到，或者没有指定必须收到指定长度，就执行回调，否则继续监听收事件
+            if ( pn->value.buf.end == pn->value.buf.size || !(pn->value.flags & nio_flag_exact_size) ) {
+                pn = alg::dlinklist_pop_front(&ch->rdops);
+                ch->iocb(ch, channel_event_received, &pn->value.buf, ch->arg);
+                free(pn);
+            }
+
+            /// 如果接收缓存队列里还有需要接收消息的缓存，继续请求读事件。
+            if ( ch->rdops.front ) {
+                bool isok = selector_request(ch->sel, ch->fd, select_read, pn->value.exp, &err);
+                assert(isok);
+            }
+        } 
+        else if ( events == select_remove ) {
+            // channel will be closed
+            if ( ch->state != channel_state_closed ) {
+                ch->state = channel_state_closed;
+                bool isok = net::socket_close(ch->fd, &err);
+                assert(isok);
+            }
+            ch->iocb(ch, channel_event_closed, nullptr, ch->arg);
+        }
+        else if ( events == select_add ) {
+            // added
+        }
+        else {
+            assert("channel_event_callback event" == nullptr);
+        }
+    }
+
+} // end namespace detail
+
+} // end namespace nio
