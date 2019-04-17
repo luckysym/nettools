@@ -64,6 +64,14 @@ namespace nio
     typedef alg::basic_dlink_list<sel_oper_t> sel_oper_list;
     typedef alg::basic_dlink_list<sel_expire_t> sel_expire_list;
 
+    typedef struct select_event {
+        int   fd;
+        int   event;
+        void *arg;
+        selector_event_proc callback;
+    } sel_event_t;
+    typedef void (*selector_dispatch_proc)(sel_event_t * event, void * disparg);
+
     struct selector {
         mt::mutex_t      *reqlock;   ///< lock for request operation list(requests) accessing
         sel_oper_list     requests;  ///< request operation queue
@@ -77,6 +85,8 @@ namespace nio
         sel_item_array    items;     ///< registered items
         sel_expire_list   timeouts;  ///< timeout queue
         int               count;     ///< total fd registered in epoll, event fd not involved
+        selector_dispatch_proc  disp;  ///< event dispatcher
+        void *            disparg;   ///< argument of disp proc
 
         int               evfd;     ///< event fd for nofitier
         int               epfd;     ///< epoll fd
@@ -105,6 +115,14 @@ namespace nio
     /// run the selector
     int  selector_run(selector_t *sel, err::error_t *err);
 
+    namespace detail {
+
+        void selector_sync_dispatcher(sel_event_t *event, void *disparg) {
+            event->callback(event->fd, event->event, event->arg);
+        }
+
+    } // end namespace detail
+
     namespace epoll {
 
         sel_item_t * selector_add_internal(selector_epoll * sel, sel_oper_t * oper, err::error_t *e);
@@ -113,7 +131,6 @@ namespace nio
         bool selector_run_internal(selector_epoll *sel, err::error_t *e);
 
     } // end namespace detail
-
 
     namespace detail {
         // nio buffer 结构
@@ -208,6 +225,8 @@ nio::selector_t * nio::selector_init(nio::selector_t *sel, int options, err::err
     sel->events.size   = 0;
 
     sel->reqlock = nullptr;
+    sel->disp = detail::selector_sync_dispatcher;
+    sel->disparg = nullptr;
 
     // create epoll fd
     sel->epfd = epoll_create1(EPOLL_CLOEXEC);
@@ -438,7 +457,9 @@ int  nio::selector_run(nio::selector_t *sel, err::error_t *err)
         // 超时了，执行回调，重设epoll, 踢出队列.
         //
         sel_item_t *p = sel->items.values + tnode->value.fd;
-        p->callback(p->fd, select_timeout | tnode->value.ops, p->arg);
+
+        sel_event_t se {p->fd, select_timeout | tnode->value.ops, p->arg, p->callback };
+        sel->disp(&se, sel->disparg);
 
         if ( tnode->value.ops & select_read ) p->events &= ~(EPOLLIN);
         else if ( tnode->value.ops & select_write ) p->events &= ~(EPOLLOUT);
@@ -492,8 +513,9 @@ sel_item_t * selector_add_internal(selector_epoll *sel, sel_oper_t *oper, err::e
     p->arg = oper->arg;
 
     // added callback;
-    p->callback(p->fd, select_add, p->arg);
-
+    sel_event_t se {p->fd, select_add, p->arg, p->callback }; 
+    sel->disp(&se, sel->disparg);
+    
     // extend epoll events 
     sel->count += 1;
     array_realloc(&sel->events, sel->count + 1);  // 还有一个是event fd
@@ -514,8 +536,9 @@ bool selector_remove_internal(selector_epoll * sel, sel_oper_t *oper, err::error
     assert(r == 0);
 
     // removal callback
-    p->callback(p->fd, select_remove, p->arg);
-
+    sel_event_t se {p->fd, select_remove, p->arg, p->callback }; 
+    sel->disp(&se, sel->disparg);
+    
     // remove from timeout queue
     auto node = sel->timeouts.front;
     while ( node && p->rd.value.inque && p->wr.value.inque) {
@@ -623,13 +646,15 @@ bool selector_run_internal(selector_epoll *sel, err::error_t *e)
 
             // 无论是否异常，有消息可读就先读. 而异常和可写，只处理一个
             if ( events & EPOLLIN ) {
-                p->callback(fd, select_read, p->arg);  // 回调
+                sel_event_t se {fd, select_read, p->arg, p->callback};
+                sel->disp(&se, sel->disparg);
                 dlinklist_remove(&sel->timeouts, &p->rd);
                 p->rd.value.inque = 0;
                 p->events &= (~EPOLLIN);
             }
             if ( events & EPOLLERR ) {
-                p->callback(fd, select_error, p->arg);
+                sel_event_t se {fd, select_error, p->arg, p->callback};
+                sel->disp(&se, sel->disparg);
                 if ( p->rd.value.inque ) {
                     dlinklist_remove(&sel->timeouts, &p->rd);
                     p->rd.value.inque = 0;
@@ -640,7 +665,9 @@ bool selector_run_internal(selector_epoll *sel, err::error_t *e)
                 }
                 p->events = 0;
             } else if ( events & EPOLLOUT ) {
-                p->callback(fd, select_write, p->arg);
+                sel_event_t se {fd, select_write, p->arg, p->callback};
+                sel->disp(&se, sel->disparg);
+                // p->callback(fd, select_write, p->arg);
                 dlinklist_remove(&sel->timeouts, &p->wr);
                 p->wr.value.inque = 0;
                 p->events &= (~EPOLLOUT);
