@@ -21,6 +21,9 @@ namespace err {
     /// push error info to the error object
     void push_error_info(error_t * err, int size, const char * format, ...);
 
+    // move src error to dest
+    void move_error_info(error_t * dest, error_t *src);
+
     void trace_stderr(const char * file, int line, const char * format, ...);
 
 } // end namespace sl
@@ -87,4 +90,13 @@ void err::push_error_info(err::error_info * err, int size, const char *format, .
     va_start(ap, format);
     vsnprintf(err->str, size, format, ap);
     va_end(ap);
+}
+
+inline 
+void err::move_error_info(error_t * dest, error_t *src) {
+    free_error_info(dest);
+    dest->str = src->str;
+    dest->next = src->next;
+    src->str = nullptr;
+    src->next = nullptr;
 }
