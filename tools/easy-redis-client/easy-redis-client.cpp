@@ -34,7 +34,7 @@ void redis_channel_callback(nio::channel_t *ch, int event, void *io, void *arg) 
             assert(isok);
         } else {
             G_stop = 1;
-            nio::selector_notify(ch->sel, &err);
+            nio::selector_wakeup(ch->sel, &err);
         }
     }
     else {

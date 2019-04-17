@@ -100,7 +100,7 @@ namespace nio
     bool selector_request(selector_t * sel, int fd, int events, int64_t expire, err::error_t *err);
 
     /// notify the selector waking up
-    bool selector_notify(selector_t * sel, err::error_t *err);
+    bool selector_wakeup(selector_t * sel, err::error_t *err);
 
     /// run the selector
     int  selector_run(selector_t *sel, err::error_t *err);
@@ -357,7 +357,7 @@ bool nio::selector_remove(nio::selector_t * sel, int fd, err::error_t *err)
 }
 
 inline 
-bool nio::selector_notify(nio::selector_epoll* sel, err::error_t *err)
+bool nio::selector_wakeup(nio::selector_epoll* sel, err::error_t *err)
 {
     int64_t n = 1;
     int r = write(sel->evfd, &n, sizeof(n));
