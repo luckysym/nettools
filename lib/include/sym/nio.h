@@ -115,6 +115,24 @@ namespace nio
     } // end namespace detail
 
 
+    namespace detail {
+        // nio buffer 结构
+        typedef struct nio_operation {
+            io::buffer_t buf;
+            int          flags;
+            int64_t      exp;
+        } nio_oper_t;
+
+        // nio buffer 链表节点类型
+        typedef alg::basic_dlink_node<nio_oper_t> nio_oper_node_t;
+
+        // nio buffer 队列类型
+        typedef alg::basic_dlink_list<nio_oper_t> nio_oper_queue_t;
+
+        // channel event callback registered into selector
+        void channel_event_callback(int fd, int events, void *arg);
+    }; // end namespace detail
+
     const int channel_state_closed  = 0;    ///< nio channel state closed
     const int channel_state_opening = 1;    ///< nio channel state opening
     const int channel_state_open    = 2;    ///< nio channel state open
@@ -138,19 +156,6 @@ namespace nio
     /// nio channel io event calllback function type
     typedef void (*channel_io_proc)(channel_t * ch, int event, void *io, void *arg);
 
-    /// nio buffer 结构
-    typedef struct nio_operation {
-        io::buffer_t buf;
-        int          flags;
-        int64_t      exp;
-    } nio_oper_t;
-
-    /// nio buffer 链表节点类型
-    typedef alg::basic_dlink_node<nio_oper_t> nio_oper_node_t;
-
-    /// nio buffer 队列类型
-    typedef alg::basic_dlink_list<nio_oper_t> nio_oper_queue_t;
-
     /// nio channel结构。
     struct nio_channel {
         int                 fd;      ///< channel文件描述字。
@@ -158,8 +163,8 @@ namespace nio
         selector_t *        sel;     ///< 当前channel关联的事件选择器。
         channel_io_proc     iocb;    ///< io回调函数。
         void *              arg;     ///< 在iocb调用时输出的用户自定义参数，在channel_init时指定。
-        nio_oper_queue_t    wrops;  ///< 发送缓存队列。
-        nio_oper_queue_t    rdops;  ///< 接收缓存队列。
+        detail::nio_oper_queue_t    wrops;  ///< 发送缓存队列。
+        detail::nio_oper_queue_t    rdops;  ///< 接收缓存队列。
     };
 
     /// shutdown the channel, how is channel_shut_*.
@@ -183,9 +188,6 @@ namespace nio
     /// receive any data asynchronously.
     bool channel_recvsome_async(channel_t *ch, char * buf, int len, int64_t exp, err::error_t * err);
 
-    namespace detail {
-        void channel_event_callback(int fd, int events, void *arg);
-    };
 } // end namespace nio
 
 inline 
@@ -740,7 +742,7 @@ namespace nio
         } else {
 
             // create a buffer node and push to channel write buffer queue
-            nio_oper_node_t * pn = (nio_oper_node_t*)malloc(sizeof(nio_oper_node_t));
+            auto * pn = (detail::nio_oper_node_t*)malloc(sizeof(detail::nio_oper_node_t));
             io::buffer_init(&pn->value.buf);
             pn->prev = pn->next = nullptr;
 
@@ -788,7 +790,7 @@ namespace nio
             return true;
         } else {
             // create a buffer node and push to channel read buffer queue
-            nio_oper_node_t * pn = (nio_oper_node_t*)malloc(sizeof(nio_oper_node_t));
+            auto * pn = (detail::nio_oper_node_t*)malloc(sizeof(detail::nio_oper_node_t));
             io::buffer_init(&pn->value.buf);
             pn->prev = pn->next = nullptr;
 
@@ -821,7 +823,7 @@ namespace detail {
             }
         }
         else if ( events == select_read ) {
-            nio_oper_node_t *pn = ch->rdops.front;
+            detail::nio_oper_node_t *pn = ch->rdops.front;
             int n = 0;
             int t = 0;
             int len =  pn->value.buf.size - pn->value.buf.end;
