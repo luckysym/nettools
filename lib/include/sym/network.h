@@ -267,13 +267,18 @@ int net::socket_open_stream(const net::location * loc, int options, err::error_i
 
     // connect to remote
     int r = connect(fd, paddr, addrlen);
-    if ( r == -1 && errno != EINPROGRESS ) {
+    if ( r == -1 ) {
         if ( err ) {
-            err::push_error_info(err, 128, "connect error, fd=%d, err=%d, %s", 
-                fd, errno, strerror(errno));
+            if ( errno == EINPROGRESS ) {
+                err::push_error_info(err, 128, "connect in progress, fd=%d, err=%d, %s", 
+                    fd, errno, strerror(errno));
+            } else {
+                err::push_error_info(err, 128, "connect error, fd=%d, err=%d, %s", 
+                    fd, errno, strerror(errno));
+                close(fd);
+                return -1;
+            }
         }
-        close(fd);
-        return -1;
     }
 
     return fd;
