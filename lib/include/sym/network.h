@@ -637,6 +637,7 @@ int net::socket_recv(int fd, char *data, int len, err::error_t *err)
     }
 }
 
+inline
 int net::socket_accept(int sfd, int sockopts, location_t *remote, err::error_t *err)
 {
     char addrbuf[128];
