@@ -212,6 +212,22 @@ namespace nio
     /// receive data with exact size asynchronously.
     bool channel_recvn_async(channel_t *ch, char * buf, int len, int64_t exp, err::error_t * err);
 
+    typedef struct nio_listener listener_t;
+
+    typedef void (*listener_io_proc)(listener_t *lis, channel_t * ch, void *arg);
+
+    struct nio_listener {
+        int               fd;
+        int               state;
+        selector_t  *     sel;
+        listener_io_proc  iocb;
+        void *            arg;
+    };
+
+    bool listener_init(listener_t * lis, selector_t * sel, listener_io_proc cb, void *arg, err::error_t *e);
+    bool listener_open(listener_t * lis, net::location_t * local, err::error_t *e);
+    bool listener_close(listener_t * lis, err::error_t *e);
+    
 } // end namespace nio
 
 inline 
