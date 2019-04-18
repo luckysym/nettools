@@ -4,7 +4,7 @@
 #include <sym/network.h>
 
 namespace srpc {
-
+    
     class SRPC_SyncConnection {
     private:
         nio::selector_t  m_sel;
@@ -20,12 +20,68 @@ namespace srpc {
         const err::error_t * last_error() const { return &m_err;}
     }; // end class SRPC_SyncConnection
 
+
+    typedef alg::basic_dlink_node<nio::listener_t> listener_node_t;
+    typedef alg::basic_dlink_node<nio::channel_t>  channel_node_t;
+
+    typedef alg::basic_dlink_list<nio::listener_t> listener_list_t;
+    typedef alg::basic_dlink_list<nio::channel_t>  channel_list_t;
+
+    class SRPC_AsyncServer {
+    private:
+        nio::selector_t  m_sel;
+        listener_list_t  m_lss;
+        channel_list_t   m_chs;
+        err::error_t     m_err;
+
+    public:
+        bool add_listener(const char * url);
+        bool run();
+    }; // end class SRPC_AsyncServer
+
     namespace detail {
         void SRPC_SyncConnIoCallback ( nio::channel_t * ch, int event, void *io, void *arg);
+    
+        void SRC_AsyncListenIoCallback(nio::listener_t *lis, nio::channel_t * ch, void *arg);
     } // end namespace detail
 } // end namespace srpc
 
 namespace srpc {
+
+    inline 
+    bool SRPC_AsyncServer::add_listener(const char * url) 
+    {
+        err::init_error_info(&m_err);
+        listener_node_t * lsn = (listener_node_t*)malloc(sizeof(listener_node_t));
+        
+        bool isok = nio::listener_init(&lsn->value, &m_sel, detail::SRC_AsyncListenIoCallback, lsn, &m_err);
+        assert(isok);
+
+        net::location_t local;
+        net::location_init(&local);
+        auto p = net::location_from_url(&local, url);
+        assert(p);
+
+        isok = nio::listener_open(&lsn->value, &local, &m_err);
+        assert(isok);
+
+        net::location_free(&local);
+        alg::dlinklist_push_back(&m_lss, lsn);
+
+        return isok;
+    }
+
+    inline 
+    bool SRPC_AsyncServer::run() 
+    {
+        err::init_error_info(&m_err);
+        while (1) {
+            int r = nio::selector_run(&m_sel, &m_err);
+            assert( r >= 0 );
+        }
+
+        return true;
+    }
 
     inline
     SRPC_SyncConnection::SRPC_SyncConnection()
