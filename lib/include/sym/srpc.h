@@ -54,7 +54,7 @@ namespace srpc {
         err::init_error_info(&m_err);
         listener_node_t * lsn = (listener_node_t*)malloc(sizeof(listener_node_t));
         
-        bool isok = nio::listener_init(&lsn->value, &m_sel, detail::SRC_AsyncListenIoCallback, lsn, &m_err);
+        bool isok = nio::listener_init(&lsn->value, &m_sel, detail::SRC_AsyncListenIoCallback, lsn);
         assert(isok);
 
         net::location_t local;

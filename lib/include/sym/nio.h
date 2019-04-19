@@ -156,8 +156,8 @@ namespace nio
     }; // end namespace detail
 
     const int channel_state_closed  = 0;    ///< nio channel state closed
-    const int channel_state_opening = 1;    ///< nio channel state opening
-    const int channel_state_open    = 2;    ///< nio channel state open
+    const int channel_state_open    = 1;    ///< nio channel state open
+    const int channel_state_opening = 2;    ///< nio channel state opening
     const int channel_state_closing = 3;    ///< nio channel state closing
 
     const int channel_event_received  = 1;
@@ -213,6 +213,9 @@ namespace nio
     /// receive data with exact size asynchronously.
     bool channel_recvn_async(channel_t *ch, char * buf, int len, int64_t exp, err::error_t * err);
 
+    const int listener_state_closed  = 0;    ///< nio channel state closed
+    const int listener_state_open    = 2;    ///< nio channel state open
+    
     typedef struct nio_listener listener_t;
 
     typedef void (*listener_io_proc)(listener_t *lis, channel_t * ch, void *arg);
@@ -225,10 +228,14 @@ namespace nio
         void *            arg;
     };
 
-    bool listener_init(listener_t * lis, selector_t * sel, listener_io_proc cb, void *arg, err::error_t *e);
+    bool listener_init(listener_t * lis, selector_t * sel, listener_io_proc cb, void *arg);
     bool listener_open(listener_t * lis, net::location_t * local, err::error_t *e);
     bool listener_close(listener_t * lis, err::error_t *e);
     
+    namespace detail {
+        void listener_event_callback(int fd, int events, void *arg);
+    }
+
 } // end namespace nio
 
 

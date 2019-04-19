@@ -44,15 +44,15 @@ namespace detail {
                 bool isok = selector_request(ch->sel, ch->fd, select_read, pn->value.exp, &err);
                 assert(isok);
             }
-        } 
+        }
         else if ( events == select_remove ) {
             // channel will be closed
             if ( ch->state != channel_state_closed ) {
                 ch->state = channel_state_closed;
                 bool isok = net::socket_close(ch->fd, &err);
                 assert(isok);
+                ch->iocb(ch, channel_event_closed, nullptr, ch->arg);
             }
-            ch->iocb(ch, channel_event_closed, nullptr, ch->arg);
         }
         else if ( events == select_add ) {
             // added

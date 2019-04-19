@@ -13,7 +13,7 @@ namespace nio
     {
         if ( ch->state != channel_state_closed ) {
             ch->state = channel_state_closed;
-            bool isok = selector_request(ch->sel, ch->fd, select_remove, -1, e);
+            bool isok = selector_remove(ch->sel, ch->fd, e);
             assert(isok);
             return net::socket_close(ch->fd, e);
         }
