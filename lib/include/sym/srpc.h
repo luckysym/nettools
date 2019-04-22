@@ -27,6 +27,27 @@ namespace srpc {
     typedef alg::basic_dlink_list<nio::listener_t> listener_list_t;
     typedef alg::basic_dlink_list<nio::channel_t>  channel_list_t;
 
+
+    typedef struct srpc_async_server {
+        nio::selector_t  selector;
+        listener_list_t  listeners;
+        channel_list_t   channels;
+    } async_server_t;
+
+    bool async_server_init(async_server_t *as, err::error_t *e);
+
+    nio::listener_t * async_server_add_listener(async_server_t *as, const char *local, err::error_t *e);
+
+    bool async_server_run(async_server_t *as, err::error_t *e);
+
+    bool async_server_close(async_server_t *as, err::error_t *e);
+
+    namespace detail {
+
+        void SRPC_SyncConnIoCallback ( nio::channel_t * ch, int event, void *io, void *arg);
+        void srpc_async_listener_callback(nio::listener_t *lis, int event, nio::listen_io_param_t * io, void *arg);
+    }
+    
     class SRPC_AsyncServer {
     private:
         nio::selector_t  m_sel;
@@ -40,47 +61,55 @@ namespace srpc {
     }; // end class SRPC_AsyncServer
 
     namespace detail {
-        void SRPC_SyncConnIoCallback ( nio::channel_t * ch, int event, void *io, void *arg);
-    
-        void SRC_AsyncListenIoCallback(nio::listener_t *lis, nio::channel_t * ch, void *arg);
+        
     } // end namespace detail
 } // end namespace srpc
 
 namespace srpc {
 
     inline 
-    bool SRPC_AsyncServer::add_listener(const char * url) 
+    bool async_server_init(async_server_t * as, err::error_t *e) 
     {
-        err::init_error_info(&m_err);
-        listener_node_t * lsn = (listener_node_t*)malloc(sizeof(listener_node_t));
-        
-        bool isok = nio::listener_init(&lsn->value, &m_sel, detail::SRC_AsyncListenIoCallback, lsn);
+        bool isok;
+        isok = nio::selector_init(&as->selector, 0, e);
+        if ( !isok ) return false;
+
+        isok = alg::dlinklist_init(&as->listeners);
         assert(isok);
 
-        net::location_t local;
-        net::location_init(&local);
-        auto p = net::location_from_url(&local, url);
-        assert(p);
-
-        isok = nio::listener_open(&lsn->value, &local, &m_err);
+        isok = alg::dlinklist_init(&as->channels);
         assert(isok);
-
-        net::location_free(&local);
-        alg::dlinklist_push_back(&m_lss, lsn);
-
         return isok;
     }
 
     inline 
-    bool SRPC_AsyncServer::run() 
+    nio::listener_t * 
+    async_server_add_listener(async_server_t *as, const char *local, err::error_t *e)
     {
-        err::init_error_info(&m_err);
-        while (1) {
-            int r = nio::selector_run(&m_sel, &m_err);
-            assert( r >= 0 );
+        net::location_t clocal;
+        net::location_init(&clocal);
+        bool isok = net::location_from_url(&clocal, local);
+        if ( !isok ) {
+            if ( e ) err::push_error_info(e, 128, "bad url: %s", local);
+            return nullptr;            
         }
 
-        return true;
+        listener_node_t * lsn = (listener_node_t*)malloc(sizeof(listener_node_t));
+        nio::listener_t * pr = &lsn->value;
+
+        isok = nio::listener_init(&lsn->value, &as->selector, detail::srpc_async_listener_callback, nullptr);
+        assert(isok);
+
+        isok = nio::listener_open(&lsn->value, &clocal, e);
+        if ( !isok ) {
+            free(lsn);
+            pr = nullptr;
+        } else {
+            alg::dlinklist_push_back(&as->listeners, lsn);
+        }
+
+        net::location_free(&clocal);
+        return pr;
     }
 
     inline
