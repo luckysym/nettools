@@ -26,6 +26,7 @@ namespace nio
     const int select_remove   = 32;
     
     const int init_list_size = 128;    ///< 列表初始化大小
+    
     const int selopt_thread_safe = 1;  ///< selector support multi-thread
 
     /// selector event callback function type
@@ -72,13 +73,6 @@ namespace nio
     } sel_event_t;
     typedef void (*selector_dispatch_proc)(sel_event_t * event, void * disparg);
 
-    struct selector {
-        mt::mutex_t      *reqlock;   ///< lock for request operation list(requests) accessing
-        sel_oper_list     requests;  ///< request operation queue
-        sel_item_array    items;     ///< registered items
-        sel_expire_list   timeouts;  ///< timeout queue
-        int               count;     ///< total fd registered in epoll
-    };
     struct selector_epoll {
         mt::mutex_t      *reqlock;   ///< lock for request operation list(requests) accessing
         sel_oper_list     requests;  ///< request operation queue
@@ -96,10 +90,10 @@ namespace nio
     typedef struct selector_epoll selector_t;
 
     /// init and return the selector, returns null if failed
-    selector_t * selector_init(selector_t *sel, int options, err::error_t *err);
+    bool selector_init(selector_t *sel, int options, err::error_t *err);
 
     /// init and return the selector, with custom event dispatcher
-    selector_t * selector_init(selector_t *sel, int options, selector_dispatch_proc disp, void *disparg, err::error_t *err);
+    bool selector_init(selector_t *sel, int options, selector_dispatch_proc disp, void *disparg, err::error_t *err);
 
     /// destroy the selector created by selector_create
     bool selector_destroy(selector_t *sel, err::error_t *err);
