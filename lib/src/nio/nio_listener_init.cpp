@@ -42,3 +42,62 @@ namespace nio
     }
 
 } // end namespace nio
+
+namespace nio {
+namespace detail {
+
+    void listener_event_callback(int sfd, int events, void *arg)
+    {
+        assert( sfd >= 0 );
+
+        nio_listener * lis = (nio_listener*)arg;
+        assert( lis );
+
+        err::error_t err;
+        err::init_error_info(&err);
+
+        if ( events == nio::select_read ) {
+            net::location_t remote;
+            net::location_init(&remote);
+
+            while ( lis->chops.front ) {
+                channel_node_t *chn = lis->chops.front;
+                channel_t *ch = chn->value;
+                
+                int cfd = net::socket_accept(sfd, net::sockopt_nonblocked|net::sockopt_tcp_nodelay, &remote, &err);
+                if ( cfd >= 0 ) {
+                    ch->fd = cfd;
+                    ch->state = channel_state_open;
+
+                    listen_io_param_t ioparam;
+                    ioparam.channel = ch;
+                    ioparam.remote = &remote;
+                    lis->iocb(lis, listener_event_accepted, &ioparam, lis->arg);
+                    
+                    // pop and free the channel node
+                    alg::dlinklist_pop_front(&lis->chops);
+                    free(chn);
+
+                    // destroy location
+                    net::location_free(&remote);
+                } else if ( err.str == nullptr ) {
+                    // no more channel to accept
+                    break;  
+                } else {
+                    // accept error
+                    listen_io_param_t ioparam;
+                    ioparam.channel = ch;
+                    ioparam.remote = nullptr;
+                    lis->iocb(lis, listener_event_error, &ioparam, lis->arg);
+
+                    // pop and free the channel node
+                    alg::dlinklist_pop_front(&lis->chops);
+                    free(chn);
+                }
+            }
+        } else {
+            assert("listener_event_callback unknown events" == nullptr);
+        }
+    }
+
+} } // end namespace nio::detail

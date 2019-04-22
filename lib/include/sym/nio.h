@@ -216,9 +216,19 @@ namespace nio
     const int listener_state_closed  = 0;    ///< nio channel state closed
     const int listener_state_open    = 2;    ///< nio channel state open
     
-    typedef struct nio_listener listener_t;
+    const int listener_event_accepted = 1;
+    const int listener_event_error    = 2;
 
-    typedef void (*listener_io_proc)(listener_t *lis, channel_t * ch, void *arg);
+    typedef struct nio_listener listener_t;
+    typedef alg::basic_dlink_node<channel_t *> channel_node_t;
+    typedef alg::basic_dlink_list<channel_t *> channel_list_t;
+    
+    typedef struct nio_listener_io_param
+    {
+        channel_t *             channel;
+        const net::location_t * remote;
+    } listen_io_param_t;
+    typedef void (*listener_io_proc)(listener_t *lis, int event, listen_io_param_t *io, void *arg);
 
     struct nio_listener {
         int               fd;
@@ -226,6 +236,7 @@ namespace nio
         selector_t  *     sel;
         listener_io_proc  iocb;
         void *            arg;
+        channel_list_t    chops;
     };
 
     bool listener_init(listener_t * lis, selector_t * sel, listener_io_proc cb, void *arg);
@@ -233,7 +244,7 @@ namespace nio
     bool listener_close(listener_t * lis, err::error_t *e);
     
     namespace detail {
-        void listener_event_callback(int fd, int events, void *arg);
+        void listener_event_callback(int sfd, int events, void *arg);
     }
 
 } // end namespace nio
