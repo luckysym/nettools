@@ -49,7 +49,7 @@ namespace net {
     } location_t;
 
     /// init a location struct
-    struct location * location_init(struct location *loc);
+    bool location_init(struct location *loc);
 
     /// free the location string members
     void location_free(struct location *loc);    
@@ -58,7 +58,7 @@ namespace net {
     void location_copy(location_t * dest, const location_t *src);
     
     /// parse url to location, return the localtion pointer if success, null if failed.
-    location_t * location_from_url(struct location * loc, const char * url);
+    bool location_from_url(struct location * loc, const char * url);
 
     /// free location members
     void location_free(struct localtion * loc);
@@ -67,13 +67,13 @@ namespace net {
     /// \param attr out, 输出的socket参数。
     /// \param name in, 名称，如tcp, tcp6, udp, udp6, unix
     /// \return 解析成功，返回socket_attrib结构指针，否则返回null
-    socket_attrib * sockattr_from_protocol(socket_attrib * attr, const char * name);
+    bool sockattr_from_protocol(socket_attrib * attr, const char * name);
 
     /// 根据locaction设置socketaddr
     socklen_t sockaddr_from_location(sockaddr *paddr, socklen_t len, const location *loc, err::error_t * err);
 
     /// convert sockaddr to location, returns the localtion pointer if succeed, or null if error 
-    location_t * sockaddr_to_location(location_t *loc, const sockaddr * addr, socklen_t len);
+    bool sockaddr_to_location(location_t *loc, const sockaddr * addr, socklen_t len);
 
     /// send message to remote, and return if all data sent or error or timeout, 
     /// returns total bytes sent if succeeded, or return -1 if failed, or 0 if timeout .
@@ -110,13 +110,13 @@ namespace net {
 } // end namespace net 
 
 inline 
-net::location * net::location_init(net::location *loc)
+bool net::location_init(net::location *loc)
 {
     loc->proto = nullptr;
     loc->host = nullptr;
     loc->port = 0;
     loc->path = nullptr;
-    return loc;
+    return true;
 }
 
 inline 
@@ -142,7 +142,7 @@ void net::location_copy(net::location_t * dest, const net::location_t *src)
 }
 
 inline 
-net::location * net::location_from_url(struct net::location * loc, const char * url)
+bool net::location_from_url(struct net::location * loc, const char * url)
 {
         // 解析protocol
         const char * proto = url;
@@ -161,7 +161,7 @@ net::location * net::location_from_url(struct net::location * loc, const char * 
         if ( *host == '[')  {
             host += 1;
             p0 = ::strchr((char*)host, ']');
-            if ( !p0 ) return nullptr;
+            if ( !p0 ) return false;
         } else {
             p0 = ::strchr((char*)host, ':');
             if ( !p0 ) p0 = ::strchr((char*)host, '/');
@@ -196,7 +196,7 @@ net::location * net::location_from_url(struct net::location * loc, const char * 
         } 
         if ( port ) loc->port = atoi(port);
         if ( path ) loc->path = strdup(path);
-        return loc;
+        return true;
 }
 
 inline 
@@ -204,8 +204,8 @@ int net::socket_open_stream(const net::location * loc, int options, err::error_i
 {
     // init socket attributes
     sockattr_t attr;
-    sockattr_t * p = sockattr_from_protocol(&attr, loc->proto);
-    if ( !p ) {
+    bool isok = sockattr_from_protocol(&attr, loc->proto);
+    if ( !isok ) {
         if ( err ) err::push_error_info(err, 128, "bad socket protocol name: %s", loc->proto);
         return -1;
     }
@@ -386,7 +386,7 @@ bool net::socket_close( int fd, struct err::error_info * err)
 }
 
 inline
-net::location_t * net::sockaddr_to_location(net::location_t *loc, const sockaddr* addr, socklen_t len)
+bool net::sockaddr_to_location(net::location_t *loc, const sockaddr* addr, socklen_t len)
 {
     location_free(loc);
     if ( addr->sa_family == AF_INET ) {
@@ -428,8 +428,8 @@ socklen_t net::sockaddr_from_location(sockaddr *paddr, socklen_t len, const loca
 {
     // 根据protocol获取af
     sockattr_t attr;
-    sockattr_t * p = sockattr_from_protocol(&attr, loc->proto);
-    if ( !p ) {
+    bool isok = sockattr_from_protocol(&attr, loc->proto);
+    if ( !isok ) {
         if ( err ) {
             err::push_error_info(err, 128, "bad location protocol, %s", loc->proto);
         }
@@ -482,7 +482,7 @@ socklen_t net::sockaddr_from_location(sockaddr *paddr, socklen_t len, const loca
 } // end net::sockaddr_from_location
 
 inline 
-net::socket_attrib * net::sockattr_from_protocol(net::socket_attrib * attr, const char * name)
+bool net::sockattr_from_protocol(net::socket_attrib * attr, const char * name)
 {
     attr->proto = 0;
     if ( name == nullptr ) {
@@ -510,9 +510,9 @@ net::socket_attrib * net::sockattr_from_protocol(net::socket_attrib * attr, cons
         attr->af   = AF_INET6;
         attr->type = SOCK_RAW;
     } else {
-        return nullptr;
+        return false;
     }
-    return attr;
+    return true;
 }
 inline 
 bool net::socket_shutdown(int fd, int how, err::error_t *e)
@@ -532,8 +532,8 @@ int net::socket_open_listener(const net::location *local, int options, err::erro
 {
     // init socket attributes
     sockattr_t attr;
-    sockattr_t * p = sockattr_from_protocol(&attr, local->proto);
-    if ( !p ) {
+    bool isok = sockattr_from_protocol(&attr, local->proto);
+    if ( !isok ) {
         if ( err ) err::push_error_info(err, 128, "bad socket protocol name: %s", local->proto);
         return -1;
     }
@@ -679,8 +679,8 @@ int net::socket_accept(int sfd, int sockopts, location_t *remote, err::error_t *
         }
 
         // new connection accepted
-        location_t * p = net::sockaddr_to_location(remote, (sockaddr*)addrbuf, addrlen);
-        assert(p);
+        bool isok = net::sockaddr_to_location(remote, (sockaddr*)addrbuf, addrlen);
+        assert(isok);
         
         return cfd;
     } else {
