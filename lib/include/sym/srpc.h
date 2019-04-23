@@ -190,6 +190,12 @@ namespace srpc {
     } // srpc_async_listener_callback
 
     inline
+    void detail::srpc_async_channel_callback(nio::channel_t *ch, int event, void *io, void *arg)
+    {
+        assert("srpc_async_channel_callback" == nullptr);
+    }
+
+    inline
     SRPC_SyncConnection::SRPC_SyncConnection()
     { 
         err::init_error_info(&m_err);
