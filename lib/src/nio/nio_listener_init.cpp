@@ -26,8 +26,6 @@ namespace nio
         bool isok = selector_add(lis->sel, fd, detail::listener_event_callback, lis, e);
         assert(isok);
 
-        isok = selector_request(lis->sel, fd, select_read, -1, e);
-        assert(isok);
         return true;
     }
 

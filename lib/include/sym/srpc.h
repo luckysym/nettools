@@ -20,25 +20,36 @@ namespace srpc {
         const err::error_t * last_error() const { return &m_err;}
     }; // end class SRPC_SyncConnection
 
-
     typedef alg::basic_dlink_node<nio::listener_t> listener_node_t;
     typedef alg::basic_dlink_node<nio::channel_t>  channel_node_t;
 
     typedef alg::basic_dlink_list<nio::listener_t> listener_list_t;
     typedef alg::basic_dlink_list<nio::channel_t>  channel_list_t;
 
+    typedef struct srpc_async_server async_server_t;
+    
+    const int srpc_event_channel_accepted = 1;
 
-    typedef struct srpc_async_server {
+    typedef struct srpc_channel_param {
+        nio::channel_t * channel;
+    } channel_param_t;
+
+    typedef void (*rpc_async_server_callback)(
+        async_server_t *as, int event, void * param, void *arg);
+
+    struct srpc_async_server {
         nio::selector_t  selector;
         listener_list_t  listeners;
         channel_list_t   channels;
-    } async_server_t;
+        rpc_async_server_callback  cb;
+        void *                     cbarg;
+    };
 
     bool async_server_init(async_server_t *as, err::error_t *e);
 
     nio::listener_t * async_server_add_listener(async_server_t *as, const char *local, err::error_t *e);
 
-    bool async_server_run(async_server_t *as, err::error_t *e);
+    int  async_server_run(async_server_t *as, err::error_t *e);
 
     bool async_server_close(async_server_t *as, err::error_t *e);
 
@@ -46,6 +57,7 @@ namespace srpc {
 
         void SRPC_SyncConnIoCallback ( nio::channel_t * ch, int event, void *io, void *arg);
         void srpc_async_listener_callback(nio::listener_t *lis, int event, nio::listen_io_param_t * io, void *arg);
+        void srpc_async_channel_callback(nio::channel_t *ch, int event, void *io, void *arg);
     }
     
     class SRPC_AsyncServer {
@@ -97,7 +109,7 @@ namespace srpc {
         listener_node_t * lsn = (listener_node_t*)malloc(sizeof(listener_node_t));
         nio::listener_t * pr = &lsn->value;
 
-        isok = nio::listener_init(&lsn->value, &as->selector, detail::srpc_async_listener_callback, nullptr);
+        isok = nio::listener_init(&lsn->value, &as->selector, detail::srpc_async_listener_callback, as);
         assert(isok);
 
         isok = nio::listener_open(&lsn->value, &clocal, e);
@@ -108,9 +120,74 @@ namespace srpc {
             alg::dlinklist_push_back(&as->listeners, lsn);
         }
 
+        // 异步接收连接
+        channel_node_t *cn = (channel_node_t *)malloc(sizeof(channel_node_t));
+        isok = nio::channel_init(&cn->value, &as->selector, detail::srpc_async_channel_callback, as, e);
+        assert(isok);
+        isok = nio::listener_accept_async(&lsn->value, &cn->value, e);
+        assert(isok);
+
         net::location_free(&clocal);
         return pr;
     }
+
+    inline 
+    int async_server_run(async_server_t *as, err::error_t *e)
+    {
+        int r = nio::selector_run(&as->selector, e);
+    }
+
+    inline 
+    bool async_server_close(async_server_t *as, err::error_t *e)
+    {
+        bool isok;
+
+        // close listener
+        listener_node_t * ln = nullptr;
+        while ( ln = alg::dlinklist_pop_front(&as->listeners) ) {
+            err::error_t e1;
+            err::init_error_info(&e1);
+            isok = nio::listener_close(&ln->value, &e1);
+            assert(isok);
+            free(ln);
+            err::free_error_info(&e1);
+        }
+
+        // close channel
+        channel_node_t * cn = nullptr;
+        while ( cn == alg::dlinklist_pop_front(&as->channels) ) {
+            err::error_t e2;
+            err::init_error_info(&e2);
+            isok = nio::channel_close(&cn->value, &e2);
+            assert(isok);
+            free(ln);
+            err::free_error_info(&e2);
+        }
+        return true;
+    } // end async_server_close
+
+    inline 
+    void detail::srpc_async_listener_callback(nio::listener_t *lis, int event, nio::listen_io_param_t * io, void *arg)
+    {
+        async_server_t * as = (async_server_t *)arg;
+        assert(as);
+
+        err::error_t err;
+        err::init_error_info(&err);
+
+        if ( event == nio::listener_event_accepted ) {
+            // channel在async_server_add_listener时创建
+            channel_node_t * cn = (channel_node_t *)io->channel;
+            alg::dlinklist_push_back(&as->channels, cn);  // 放入列表
+            
+            // do callback
+            channel_param_t param;
+            param.channel = &cn->value;
+            as->cb(as, srpc_event_channel_accepted, &param, as->cbarg);
+        } else {
+            assert("srpc_async_listener_callback unknown event" == nullptr);
+        }
+    } // srpc_async_listener_callback
 
     inline
     SRPC_SyncConnection::SRPC_SyncConnection()

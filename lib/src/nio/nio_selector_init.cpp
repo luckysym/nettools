@@ -2,13 +2,13 @@
 
 namespace nio
 {
-nio::selector_t *  selector_init( selector_t *sel, int options, err::error_t *err)
+bool  selector_init( selector_t *sel, int options, err::error_t *err)
 {
     return selector_init(sel, options, detail::selector_sync_dispatcher, nullptr, err);
 } // end nio::selector_init
 
 
-nio::selector_t * selector_init(selector_t * sel, int options, selector_dispatch_proc disp, void *disparg, err::error_t * err)
+bool selector_init(selector_t * sel, int options, selector_dispatch_proc disp, void *disparg, err::error_t * err)
 {
     // 成员初始化
     sel->count = 0;
@@ -31,7 +31,7 @@ nio::selector_t * selector_init(selector_t * sel, int options, selector_dispatch
     sel->epfd = epoll_create1(EPOLL_CLOEXEC);
     if ( sel->epfd == -1 ) {
         err::push_error_info(err, 128, "epoll_create1 error, %d, %s", errno, strerror(errno));
-        return nullptr;
+        return false;
     }
 
     // create event fd and register into epoll
@@ -40,7 +40,7 @@ nio::selector_t * selector_init(selector_t * sel, int options, selector_dispatch
         err::push_error_info(err, 128, "eventfd error, %d, %s", errno, strerror(errno));
         close(sel->epfd);
         sel->epfd = -1;
-        return nullptr;
+        return false;
     }
     struct epoll_event epevt;
     epevt.events = EPOLLIN;
@@ -52,7 +52,7 @@ nio::selector_t * selector_init(selector_t * sel, int options, selector_dispatch
         close(sel->evfd);
         sel->epfd = -1;
         sel->evfd = -1;
-        return nullptr;
+        return false;
     }
     array_realloc(&sel->events, 1);  // 这个是eventfd对应的
     
@@ -64,6 +64,6 @@ nio::selector_t * selector_init(selector_t * sel, int options, selector_dispatch
         assert(isok);
     }
 
-    return sel;
+    return true;
 } // end selector_init    
 } // end namespace nio

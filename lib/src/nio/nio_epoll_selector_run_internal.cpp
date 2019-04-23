@@ -3,7 +3,7 @@
 namespace nio {
 namespace epoll {
     
-bool selector_run_internal(selector_epoll *sel, err::error_t *e)
+int selector_run_internal(selector_epoll *sel, err::error_t *e)
 {
     // if ( sel->timeouts.size == 0 ) return 0;  // 没有需要等待的事件
 
