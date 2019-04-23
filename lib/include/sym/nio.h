@@ -127,7 +127,7 @@ namespace nio
         sel_item_t * selector_add_internal(selector_epoll * sel, sel_oper_t * oper, err::error_t *e);
         bool selector_remove_internal(selector_epoll * sel, sel_oper_t *oper, err::error_t *e);
         bool selector_request_internal(selector_epoll *sel, sel_oper_t *oper, err::error_t *e);
-        bool selector_run_internal(selector_epoll *sel, err::error_t *e);
+        int  selector_run_internal(selector_epoll *sel, err::error_t *e);
 
     } // end namespace detail
 
@@ -236,7 +236,8 @@ namespace nio
     bool listener_init(listener_t * lis, selector_t * sel, listener_io_proc cb, void *arg);
     bool listener_open(listener_t * lis, net::location_t * local, err::error_t *e);
     bool listener_close(listener_t * lis, err::error_t *e);
-    
+    bool listener_accept_async(listener_t * lis, channel_t * ch, err::error_t *e);
+
     namespace detail {
         void listener_event_callback(int sfd, int events, void *arg);
     }
