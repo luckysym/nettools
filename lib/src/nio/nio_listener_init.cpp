@@ -39,6 +39,11 @@ namespace nio
         return true;
     }
 
+    bool listener_accept_async(listener_t * lis, channel_t * ch, err::error_t *e)
+    {
+        return selector_request(lis->sel, lis->fd, select_read, -1, e);
+    }
+
 } // end namespace nio
 
 namespace nio {
