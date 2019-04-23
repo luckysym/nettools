@@ -7,14 +7,23 @@ int main(int argc, char **argv)
 {
     using namespace srpc;
 
-    const char * local = LOCAL_URL;
-    if ( argc > 1 ) local = argv[1];
+    const char * local_url = LOCAL_URL;
+    if ( argc > 1 ) local_url = argv[1];
 
-    SRPC_AsyncServer server;
-    bool isok = server.add_listener(local);
+    err::error_t err;
+    err::init_error_info(&err);
+
+    srpc::async_server_t server;
+    bool isok = srpc::async_server_init(&server, &err);
     assert(isok);
-    
-    server.run();
 
+    nio::listener_t * lis = srpc::async_server_add_listener(&server, local_url, &err);
+    assert(lis);
+
+    isok = srpc::async_server_run(&server, &err);
+    assert(isok);
+
+    isok = srpc::async_server_close(&server, &err);
+    assert(isok);
     return 0;
 }
