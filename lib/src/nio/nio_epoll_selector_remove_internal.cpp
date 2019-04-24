@@ -13,9 +13,11 @@ bool selector_remove_internal(selector_epoll * sel, sel_oper_t *oper, err::error
     int r = epoll_ctl(sel->epfd, EPOLL_CTL_DEL, oper->fd, nullptr);
     assert(r == 0);
 
-    // removal callback
-    sel_event_t se {p->fd, select_remove, p->arg, p->callback }; 
-    sel->disp(&se, sel->disparg);
+    // removal callback if the operation is asynchronous.
+    if ( oper->async ) {
+        sel_event_t se {p->fd, select_remove, p->arg, p->callback }; 
+        sel->disp(&se, sel->disparg);
+    }
     
     // remove from timeout queue
     auto node = sel->timeouts.front;

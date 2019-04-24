@@ -32,9 +32,11 @@ sel_item_t * selector_add_internal(selector_epoll *sel, sel_oper_t *oper, err::e
     p->callback = oper->callback;
     p->arg = oper->arg;
 
-    // added callback;
-    sel_event_t se {p->fd, select_add, p->arg, p->callback }; 
-    sel->disp(&se, sel->disparg);
+    // fd-added-event callback;
+    if ( oper->async ) {
+        sel_event_t se {p->fd, select_add, p->arg, p->callback }; 
+        sel->disp(&se, sel->disparg);
+    }
     
     // extend epoll events 
     sel->count += 1;
