@@ -41,6 +41,12 @@ namespace nio
 
     bool listener_accept_async(listener_t * lis, channel_t * ch, err::error_t *e)
     {
+        channel_ptr_node_t *node = (channel_ptr_node_t*)malloc(sizeof(channel_ptr_node_t));
+        node->value = ch;
+        node->prev = nullptr;
+        node->next = nullptr;
+        alg::dlinklist_push_back(&lis->chops, node);
+
         return selector_request(lis->sel, lis->fd, select_read, -1, e);
     }
 
@@ -63,12 +69,18 @@ namespace detail {
             net::location_t remote;
             net::location_init(&remote);
 
+            SYM_TRACE_VA("listener_event_callback, fd: %d, events: %d", sfd, events);
             while ( lis->chops.front ) {
-                channel_node_t *chn = lis->chops.front;
+                channel_ptr_node_t *chn = lis->chops.front;
                 channel_t *ch = chn->value;
+
+                SYM_TRACE_VA("listener_event_callback, got channel, %p", ch);
                 
                 int cfd = net::socket_accept(sfd, net::sockopt_nonblocked|net::sockopt_tcp_nodelay, &remote, &err);
                 if ( cfd >= 0 ) {
+
+                    SYM_TRACE_VA("listener_event_callback, accept channel, %d", cfd);
+
                     ch->fd = cfd;
                     ch->state = channel_state_open;
 
@@ -98,7 +110,8 @@ namespace detail {
                     free(chn);
                 }
             }
-        } else {
+        } 
+        else {
             assert("listener_event_callback unknown events" == nullptr);
         }
     }
