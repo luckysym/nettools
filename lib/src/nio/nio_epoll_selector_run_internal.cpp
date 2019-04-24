@@ -28,6 +28,8 @@ int selector_run_internal(selector_epoll *sel, err::error_t *e)
             epoll_event * evt = sel->events.values + i;
             int fd = evt->data.fd;
 
+            SYM_TRACE_VA("[trace] epoll event trigged, fd: %d, events: %d", fd, evt->events);
+
             if ( fd == sel->evfd ) {
                 SYM_TRACE_VA("[trace][nio] epoll_wait, event fd notified, fd: %d\n", fd);
                 if ( evt->events == EPOLLIN) {
