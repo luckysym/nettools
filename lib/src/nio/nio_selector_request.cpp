@@ -10,6 +10,7 @@ bool selector_request(selector_t* sel, int fd, int events, int64_t expire, err::
     node->value.expire = expire==-1?INT64_MAX:expire;
     node->value.callback = nullptr;
     node->value.arg = nullptr;
+    node->value.async = true;
     node->next = nullptr;
     node->prev = nullptr;
     
