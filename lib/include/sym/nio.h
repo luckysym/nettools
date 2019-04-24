@@ -53,10 +53,11 @@ namespace nio
 
     typedef struct select_operation {
         int     fd;
-        int     ops;  ///< requested operation events
+        int     ops;      ///< requested operation events
         int64_t expire;
         selector_event_proc  callback;
         void   *arg;
+        bool    async;    ///< is the operation asynchronous.
     } sel_oper_t;
     typedef alg::basic_dlink_node<sel_oper_t> sel_oper_node;
 
@@ -81,7 +82,7 @@ namespace nio
         int               def_wait;  ///< default wait timeout
         int               count;     ///< total fd registered in epoll, event fd not involved
         selector_dispatch_proc  disp;  ///< event dispatcher
-        void *            disparg;   ///< argument of disp proc
+        void *            disparg;     ///< argument of disp proc
 
         int               evfd;     ///< event fd for nofitier
         int               epfd;     ///< epoll fd
@@ -214,8 +215,8 @@ namespace nio
     const int listener_event_error    = 2;
 
     typedef struct nio_listener listener_t;
-    typedef alg::basic_dlink_node<channel_t *> channel_node_t;
-    typedef alg::basic_dlink_list<channel_t *> channel_list_t;
+    typedef alg::basic_dlink_node<channel_t *> channel_ptr_node_t;
+    typedef alg::basic_dlink_list<channel_t *> channel_ptr_list_t;
     
     typedef struct nio_listener_io_param
     {
@@ -225,12 +226,12 @@ namespace nio
     typedef void (*listener_io_proc)(listener_t *lis, int event, listen_io_param_t *io, void *arg);
 
     struct nio_listener {
-        int               fd;
-        int               state;
-        selector_t  *     sel;
-        listener_io_proc  iocb;
-        void *            arg;
-        channel_list_t    chops;
+        int                fd;
+        int                state;
+        selector_t  *      sel;
+        listener_io_proc   iocb;
+        void *             arg;
+        channel_ptr_list_t chops;
     };
 
     bool listener_init(listener_t * lis, selector_t * sel, listener_io_proc cb, void *arg);
