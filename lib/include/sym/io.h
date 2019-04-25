@@ -10,6 +10,7 @@ namespace io {
     typedef struct buffer {
         char *    data;
         size_t    size;
+        size_t    limit;
         size_t    begin;
         size_t    end;
     } buffer_t;
@@ -35,7 +36,7 @@ inline
 io::buffer_t * io::buffer_init(io::buffer_t *buf)
 {
     buf->data = nullptr;
-    buf->size = buf->begin = buf->end = 0;
+    buf->size = buf->begin = buf->end = buf->limit = 0;
     return buf;
 }
 
@@ -43,10 +44,11 @@ inline
 void io::buffer_free(io::buffer_t *buf) 
 {
     if ( buf->data ) free(buf->data);
-    buf->data = nullptr;
-    buf->size = 0;
+    buf->data  = nullptr;
+    buf->size  = 0;
+    buf->limit = 0;
     buf->begin = 0;
-    buf->end = 0;
+    buf->end   = 0;
 }
 
 inline 
@@ -58,7 +60,7 @@ io::buffer_t * io::buffer_alloc(io::buffer_t *buf, size_t size)
     } else {
         buf->data = nullptr;
     }
-    buf->size  = size;
+    buf->size  = buf->limit = size;
     buf->begin = 0;
     buf->end   = 0;
     return buf;
@@ -76,6 +78,8 @@ io::buffer_t * io::buffer_realloc(io::buffer_t *buf, size_t size)
     buf->size = size;
     if ( buf->begin > buf->size ) buf->begin = buf->size;
     if ( buf->end > buf->size ) buf->end = buf->size;
+    if ( buf->limit > buf->end ) buf->limit = buf->end;
+
     return buf;
 }
 
