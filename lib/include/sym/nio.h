@@ -17,6 +17,10 @@
 /// 包含同步非阻塞IO相关操作的名称空间。
 namespace nio
 {
+    const int nio_status_success = 0;
+    const int nio_status_error   = 1;
+    const int nio_status_timeout = 2;
+
     const int select_none     = 0;
     const int select_read     = 1;
     const int select_write    = 2;
@@ -132,24 +136,6 @@ namespace nio
 
     } // end namespace detail
 
-    namespace detail {
-        // nio buffer 结构
-        typedef struct nio_operation {
-            io::buffer_t buf;
-            int          flags;
-            int64_t      exp;
-        } nio_oper_t;
-
-        // nio buffer 链表节点类型
-        typedef alg::basic_dlink_node<nio_oper_t> nio_oper_node_t;
-
-        // nio buffer 队列类型
-        typedef alg::basic_dlink_list<nio_oper_t> nio_oper_queue_t;
-
-        // channel event callback registered into selector
-        void channel_event_callback(int fd, int events, void *arg);
-    }; // end namespace detail
-
     const int channel_state_closed  = 0;    ///< nio channel state closed
     const int channel_state_open    = 1;    ///< nio channel state open
     const int channel_state_opening = 2;    ///< nio channel state opening
@@ -172,6 +158,30 @@ namespace nio
 
     /// nio channel io event calllback function type
     typedef void (*channel_io_proc)(channel_t * ch, int event, void *io, void *arg);
+
+    typedef void (*channe_read_callback)(channel_t * ch, int status, io::buffer_t * buf, void *arg);
+
+    namespace detail {
+        // nio buffer 结构
+        typedef struct nio_operation {
+            io::buffer_t buf;
+            int          flags;
+            int64_t      exp;
+            union {
+                channe_read_callback rdcb;
+            } cb;
+            void *       cbarg;
+        } nio_oper_t;
+
+        // nio buffer 链表节点类型
+        typedef alg::basic_dlink_node<nio_oper_t> nio_oper_node_t;
+
+        // nio buffer 队列类型
+        typedef alg::basic_dlink_list<nio_oper_t> nio_oper_queue_t;
+
+        // channel event callback registered into selector
+        void channel_event_callback(int fd, int events, void *arg);
+    }; // end namespace detail
 
     /// nio channel结构。
     struct nio_channel {
@@ -212,7 +222,9 @@ namespace nio
     bool channel_recvsome_async(channel_t *ch, char * buf, int len, int64_t exp, err::error_t * err);
 
     /// receive data with exact size asynchronously.
-    bool channel_recvn_async(channel_t *ch, char * buf, int len, int64_t exp, err::error_t * err);
+    bool channel_recvn_async(
+        channel_t *ch, io::buffer_t *buf, int64_t exp, channe_read_callback cb, void *cbarg, err::error_t *e);
+
 
     const int listener_state_closed  = 0;    ///< nio channel state closed
     const int listener_state_open    = 2;    ///< nio channel state open
