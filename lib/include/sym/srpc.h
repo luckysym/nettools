@@ -24,6 +24,18 @@ namespace srpc {
     namespace detail {
         void SRPC_SyncConnIoCallback ( nio::channel_t * ch, int event, void *io, void *arg);
     }
+
+    typedef struct srpc_connection connection_t;
+
+    typedef void (*srpc_received_callback)(connection_t * cn, int status, io::buffer_t * buf, void *arg);
+
+    struct srpc_connection {
+        nio::channel_t * channel;
+    };
+
+    connection_t * connection_new(nio::channel_t * ch, err::error_t * e);
+
+    bool receive_async(connection_t * conn, io::buffer_t * buf, srpc_received_callback, void * arg, err::error_t *e);
     
 } // end namespace srpc
 

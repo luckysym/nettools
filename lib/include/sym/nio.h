@@ -184,12 +184,18 @@ namespace nio
         detail::nio_oper_queue_t    rdops;  ///< 接收缓存队列。
     };
 
-    /// shutdown the channel, how is channel_shut_*.
-    bool channel_shutdown(channel_t *ch, int how, err::error_t *e);
-
     /// init the channel.
     bool channel_init(channel_t * ch, nio::selector_t *sel, channel_io_proc cb, void *arg, err::error_t *e);
 
+    /// create and init a new channel, return the created new channel.
+    channel_t * channel_new(nio::selector_t *sel, channel_io_proc cb, void *arg, err::error_t *e);
+
+    /// delete the channel create and returned by channel_new.
+    void channel_delete(channel_t *ch);
+
+    /// shutdown the channel, how is channel_shut_*.
+    bool channel_shutdown(channel_t *ch, int how, err::error_t *e);
+    
     /// open a channel asynchronously.
     bool channel_open_async(channel_t *ch, net::location_t * remote, err::error_t * err);
 
@@ -223,7 +229,7 @@ namespace nio
         channel_t *             channel;
         const net::location_t * remote;
     } listen_io_param_t;
-    typedef void (*listener_io_proc)(listener_t *lis, int event, listen_io_param_t *io, void *arg);
+    typedef void (*listener_io_proc)(listener_t *lis, int event, const listen_io_param_t *io, void *arg);
 
     struct nio_listener {
         int                fd;
