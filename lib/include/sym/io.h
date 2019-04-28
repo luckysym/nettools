@@ -8,11 +8,11 @@
 namespace io {
     /// IO缓存
     typedef struct buffer {
-        char *    data;
-        size_t    size;
-        size_t    limit;
-        size_t    begin;
-        size_t    end;
+        char *    data;     ///< 内存指针。
+        size_t    size;     ///< 缓存总大小。
+        size_t    begin;    ///< 缓存有效数据开始位置（含）。
+        size_t    end;      ///< 缓存有效数据结束位置（不含）。
+        size_t    limit;    ///< 缓存写入或读取位置限制位置（不含）。
     } buffer_t;
 
     /// init the buffer struct
@@ -30,7 +30,26 @@ namespace io {
     /// move the data in the buffer to the front
     buffer_t * buffer_pullup(buffer_t *buf);
 
+    /// big endian to host endian
+    int32_t byteorder_btoh(int32_t n);
+
 } // end namespace io
+
+inline 
+int32_t io::byteorder_btoh(int32_t n) {
+# ifdef HOST_BIG_ENDIAN
+# error("big-endian not supported")
+# else 
+    int32_t r;
+    unsigned char * p0 = (unsigned char *)&n;
+    unsigned char * p1 = (unsigned char *)&r;
+    p1[0] = p0[3];
+    p1[1] = p0[2];
+    p1[2] = p0[1];
+    p1[3] = p0[0];
+    return r;
+# endif
+}
 
 inline 
 io::buffer_t * io::buffer_init(io::buffer_t *buf)
