@@ -48,12 +48,11 @@ namespace nio
         }
     } // end channel_recvsome_async
 
-    inline 
     bool channel_recvn_async(
         channel_t *ch, 
         io::buffer_t *buf, 
         int64_t exp, 
-        channe_read_callback cb, 
+        channel_read_callback cb, 
         void *cbarg, 
         err::error_t *e)
     {
