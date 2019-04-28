@@ -5,6 +5,10 @@
 
 namespace srpc {
     
+    /// SRPC Magic Word
+    const int16_t srpc_magic_word = 0x444F;
+    
+    /// SRPC Message Header
     typedef struct srpc_message_header
     {
 	    int16_t  magic;         ///< 消息头magic code, 取值'OD'
@@ -18,6 +22,18 @@ namespace srpc {
 	    int16_t  reserved;      ///< 保留字段
 	    int32_t  option;        ///< 可选项字段，由不同的应用域自行定义
     } message_header_t;
+
+    /// SRPC Message Structure
+    typedef struct srpc_message {
+        srpc_message_header header;   ///< header of the message
+        char                body[0];  ///< body of the message 
+    } message_t;
+
+    /// check the magic of the message.
+    bool message_check_magic(const message_t * m);  
+
+    /// get the length of the message.
+    int message_get_length(const message_t * m);
 
     class SRPC_SyncConnection {
     private:
@@ -40,11 +56,24 @@ namespace srpc {
 
     typedef struct srpc_connection connection_t;
 
-    typedef void (*srpc_received_callback)(connection_t * cn, int status, io::buffer_t * buf, void *arg);
+    const int srpc_status_success = 0;
+
+    typedef void (*srpc_receive_callback)(connection_t * cn, int status, io::buffer_t * buf, void *arg);
+    typedef void (*srpc_send_callback)(connection_t * cn, int status, io::buffer_t * buf, void *arg);
+    typedef void (*srpc_close_callback)(connection_t * cn, int status, void *arg);
+
+    typedef struct srpc_connection_callback {
+        srpc_receive_callback  rdcb;
+        srpc_send_callback     wrcb;
+        srpc_close_callback    clcb;
+        void                 * arg;
+    } connection_cb_t;
 
     typedef struct srpc_read_operation {
-        io::buffer_t           buffer;
-        srpc_received_callback cb;
+        connection_t         * conn;
+        io::buffer_t           buf;
+        int64_t                exp;
+        srpc_receive_callback  cb;
         void                 * cbarg;
     } readop_t;
     
@@ -52,33 +81,41 @@ namespace srpc {
     typedef alg::basic_dlink_list<readop_t> readop_list_t;
 
     struct srpc_connection {
-        nio::channel_t * channel;
-        int              rdtimeout;   ///< 读消息操作超时时间
+        nio::channel_t *  channel;
+        connection_cb_t   cbs;
     };
 
     connection_t * connection_new(nio::channel_t * ch, err::error_t * e);
 
     void connection_delete(connection_t * cn);
 
-    bool receive_async(connection_t * conn, io::buffer_t * buf, srpc_received_callback cb, void * arg, err::error_t *e);
+    bool receive_async(connection_t * conn, io::buffer_t * buf, int64_t exp, err::error_t *e);
     
-    void on_nio_received(channel_t * ch, int status, io::buffer_t * buf, void *arg);
-
+    namespace detail {
+        void on_nio_received(nio::channel_t * ch, int status, io::buffer_t * buf, void *arg);
+    }
 } // end namespace srpc
 
 namespace srpc {
 
     inline 
-    bool receive_async(connection_t *cn, io::buffer_t * buf, srpc_received_callback cb, void * cbarg, err::error_t *e)
+    bool message_check_magic(const message_t * m) 
     {
-        readop_t * rdop = (readop_t *)malloc(sizeof(readop_t);
-        rdop->buffer = *buf;
-        rdop->buffer->limit = sizeof(message_header_t);
-        rdop->cb = cb;
-        rdop->cbarg = cbarg;
-        int64_t exp = -1;
-        if (  (int64_t)cn->rdtimeout > 0 ) exp = chorno::now() + (int64_t)cn->rdtimeout * 1000LL;
-        return nio::channel_recvn_async(cn->channel, buf, exp, on_nio_received, rdop);
+        return ( m->header.magic == srpc_magic_word);
+    }
+
+    inline 
+    bool receive_async(connection_t *cn, io::buffer_t * buf, int64_t exp, err::error_t *e)
+    {
+        readop_t * rdop = (readop_t *)malloc(sizeof(readop_t));
+        rdop->buf = *buf;
+        rdop->buf.limit = sizeof(message_header_t);
+        rdop->exp = exp;
+        rdop->conn = cn;
+        rdop->cb = cn->cbs.rdcb;
+        rdop->cbarg = cn->cbs.arg;
+
+        return nio::channel_recvn_async(cn->channel, buf, exp, detail::on_nio_received, rdop, e);
     }
 
     inline 
@@ -87,10 +124,11 @@ namespace srpc {
     }
 
     inline 
-    connection_t * connection_new(nio::channel_t * ch, err::error_t * e)
+    connection_t * connection_new(nio::channel_t * ch, connection_cb_t * cbs, err::error_t * e)
     {
         connection_t * c = (connection_t*)malloc(sizeof(connection_t));
         c->channel = ch;
+        c->cbs = *cbs;
 
         return c;
     }
@@ -173,3 +211,42 @@ namespace srpc {
         }
     }
 } // end namespace srpc
+
+
+namespace srpc {
+namespace detail {
+
+    void on_nio_received(nio::channel_t * ch, int status, io::buffer_t * buf, void *arg)
+    {
+        readop_t * rdop = (readop_t *)malloc(sizeof(readop_t));
+        assert(rdop);
+        message_t * m = (message_t *)buf->data;
+
+        if ( status == nio::nio_status_success ) {
+
+            bool is_valid = message_check_magic(m);
+            if ( is_valid ) {
+                int msglen = io::byteorder_btoh(m->header.length);
+                if ( msglen > buf->end - buf->begin ) {
+                    // 消息总长大于当前接收长度，需要继续接收
+                    if ( buf->size < msglen + buf->begin ) {
+                        io::buffer_realloc(buf, msglen + buf->begin);
+                    }
+                    buf->limit = msglen + buf->begin;
+                    bool isok = nio::channel_recvn_async(ch, buf, rdop->exp, detail::on_nio_received, rdop, nullptr);
+                    assert(isok);
+                } else if ( msglen == buf->end - buf->begin) {
+                    // 消息总长等于接收到的长度，消息接收完成，执行回调
+                    rdop->cb(rdop->conn, srpc_status_success, buf, rdop->cbarg);
+                }
+                else {
+                    // 报文大小等于接收到的
+                }
+            } else {
+                assert("srpc::on_nio_received, invalid message magic" == nullptr);
+            }
+        }  else {
+            assert("srpc::on_nio_received, status not success" == nullptr);
+        }
+    }
+}} // end namespace srpc::detail 

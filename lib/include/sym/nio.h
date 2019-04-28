@@ -159,7 +159,7 @@ namespace nio
     /// nio channel io event calllback function type
     typedef void (*channel_io_proc)(channel_t * ch, int event, void *io, void *arg);
 
-    typedef void (*channe_read_callback)(channel_t * ch, int status, io::buffer_t * buf, void *arg);
+    typedef void (*channel_read_callback)(channel_t * ch, int status, io::buffer_t * buf, void *arg);
 
     namespace detail {
         // nio buffer 结构
@@ -168,7 +168,7 @@ namespace nio
             int          flags;
             int64_t      exp;
             union {
-                channe_read_callback rdcb;
+                channel_read_callback rdcb;
             } cb;
             void *       cbarg;
         } nio_oper_t;
@@ -223,7 +223,7 @@ namespace nio
 
     /// receive data with exact size asynchronously.
     bool channel_recvn_async(
-        channel_t *ch, io::buffer_t *buf, int64_t exp, channe_read_callback cb, void *cbarg, err::error_t *e);
+        channel_t *ch, io::buffer_t *buf, int64_t exp, channel_read_callback cb, void *cbarg, err::error_t *e);
 
 
     const int listener_state_closed  = 0;    ///< nio channel state closed
