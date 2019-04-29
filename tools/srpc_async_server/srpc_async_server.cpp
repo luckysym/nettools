@@ -6,7 +6,9 @@
 
 
 void on_accept(nio::listener_t *lis, int event, const nio::listen_io_param_t *io, void *arg);
-void on_rpc_received(srpc::connection_t * conn, int status, io::buffer_t * buf, void *arg);
+void on_rpc_receive(srpc::connection_t * conn, int status, io::buffer_t * buf, void *arg);
+void on_rpc_send(srpc::connection_t * conn, int status, io::buffer_t * buf, void *arg);
+void on_rpc_close(srpc::connection_t * conn, int status, void *arg) ;
 
 int main(int argc, char **argv)
 {
@@ -62,10 +64,12 @@ void on_accept(nio::listener_t *lis, int event, const nio::listen_io_param_t *io
         (*chs)[io->channel->fd] = io->channel;
 
         // create new rpc connection, and wait for message arrival
-        srpc::connection_t * conn = srpc::connection_new(io->channel, &err);
+        srpc::connection_cb_t cbs { on_rpc_receive, on_rpc_send, on_rpc_close, nullptr };
+        
+        srpc::connection_t * conn = srpc::connection_new(io->channel, &cbs, &err);
         io::buffer_t rbuf; 
         io::buffer_alloc(&rbuf, 1024);
-        srpc::receive_async(conn, &rbuf, on_rpc_received, nullptr, &err);
+        srpc::receive_async(conn, &rbuf, -1, &err);
 
         // accept another channel
         nio::channel_t * ch = nio::channel_new(io->channel->sel, nullptr, nullptr, &err);
@@ -75,7 +79,17 @@ void on_accept(nio::listener_t *lis, int event, const nio::listen_io_param_t *io
     }
 }
 
-void on_rpc_received(srpc::connection_t * conn, int status, io::buffer_t * buf, void *arg)
+void on_rpc_receive(srpc::connection_t * conn, int status, io::buffer_t * buf, void *arg)
 {
-    SYM_TRACE_VA("on_rpc_received, status %d", status);
+    SYM_TRACE_VA("on_rpc_receive, status %d", status);
+}
+
+void on_rpc_send(srpc::connection_t * conn, int status, io::buffer_t * buf, void *arg) 
+{
+    SYM_TRACE_VA("on_rpc_send, status %d", status);
+}
+
+void on_rpc_close(srpc::connection_t * conn, int status, void *arg) 
+{
+        SYM_TRACE_VA("on_rpc_close, status %d", status);
 }
