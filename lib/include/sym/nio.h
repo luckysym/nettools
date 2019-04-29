@@ -106,8 +106,14 @@ namespace nio
     /// add a socket fd and its callback function to the selector.
     bool selector_add(selector_t * sel, int fd, selector_event_proc cb, void *arg, err::error_t *err);
 
+    // add a socket fd and its callback function to the selector async.
+    bool selector_add_async(selector_t * sel, int fd, selector_event_proc cb, void *arg);
+
     /// remove socket from selector
     bool selector_remove(selector_t * sel, int fd, err::error_t *err);
+
+    /// remove socket from selector 
+    bool selector_remove_async(selector_t * sel, int fd);
 
     /// request events.
     bool selector_request(selector_t * sel, int fd, int events, int64_t expire, err::error_t *err);

@@ -25,7 +25,7 @@ bool selector_request(selector_t* sel, int fd, int events, int64_t expire, err::
     }
 
     int64_t n = 1;
-    int r = write(sel->evfd, &n, sizeof(n));   // 通知event fd
+    int r = write(sel->evfd, &n, sizeof(n)); 
     assert( r > 0);
 
 
