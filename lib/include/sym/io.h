@@ -33,6 +33,9 @@ namespace io {
     /// big endian to host endian
     int32_t byteorder_btoh(int32_t n);
 
+    class ConstBuffer {};
+    class MutableBuffer {};
+
 } // end namespace io
 
 inline 

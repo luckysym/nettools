@@ -48,6 +48,8 @@ namespace net {
         char * path;
     } location_t;
 
+    class Location {};
+
     /// init a location struct
     bool location_init(struct location *loc);
 
@@ -399,7 +401,7 @@ bool net::sockaddr_to_location(net::location_t *loc, const sockaddr* addr, sockl
             loc->port = ntohs(pin->sin_port);
             return loc;
         } else {
-            return nullptr;
+            return false;
         }
     } else if ( addr->sa_family == AF_INET6 ) {
         char hostbuf[128];
@@ -411,7 +413,7 @@ bool net::sockaddr_to_location(net::location_t *loc, const sockaddr* addr, sockl
             loc->port = ntohs(pin->sin6_port);
             return loc;
         } else {
-            return nullptr;
+            return false;
         }
     } else if ( addr->sa_family == AF_UNIX ) {
         const sockaddr_un *pun = (const sockaddr_un*)addr;
@@ -419,7 +421,7 @@ bool net::sockaddr_to_location(net::location_t *loc, const sockaddr* addr, sockl
             loc->path = strdup(pun->sun_path);
             return loc;
     } else {
-        return nullptr;
+        return false;
     }
 }
 

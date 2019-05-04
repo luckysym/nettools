@@ -14,6 +14,9 @@
 #include <assert.h>
 #include <string.h>
 
+#include <functional>
+#include <memory>
+
 /// 包含同步非阻塞IO相关操作的名称空间。
 namespace nio
 {
@@ -267,6 +270,43 @@ namespace nio
         void listener_event_callback(int sfd, int events, void *arg);
     }
 
+    /**
+     * @brief 简单的Socket服务端类。
+     * 
+     * 包含以下基本特性：
+     *      1. 仅支持单线程多路复用I/O操作，不支持多线程，以简化逻辑提升性能。
+     *      2. 支持多个Socket TCP端口或UNIX Socket监听。
+     *      3. 监听器持续获取新连接，直至监听器关闭。
+     *      4. 所有获取到的连接，将持续接收消息，直至连接关闭。
+     */
+    class SimpleSocketServer {
+        class ImplClass;
+        std::unique_ptr<ImplClass> m_ptrImpl;
+    public:
+        typedef std::function<bool (int sfd, int cfd, const net::Location * remote )> ListenerCallback;
+        typedef std::function<void (int fd, int status, const io::ConstBuffer & buffer)> SendCallback;
+        typedef std::function<void (int fd, int status, const io::MutableBuffer & buffer)> RecvCallback;
+        typedef std::function<void (int fd)> CloseCallback; 
+        typedef std::function<void (int status)> ServerCallback;
+    
+    public:
+        SimpleSocketServer();
+
+        int  addListener(const net::Location &loc, const ListenerCallback & callback);
+
+        int  send(int channel, const io::ConstBuffer & buffer);
+        int  receive(int channel, io::MutableBuffer & buffer);
+        int  receiveSome(int channel, io::MutableBuffer & buffer);
+        
+        int  closeListener(int fd);
+        int  closeChannel(int fd);
+
+        void setServerCallback(ServerCallback & callback);
+        bool setChannelCallback(int fd, RecvCallback & rcb, SendCallback & scb, CloseCallback ccb);
+
+        bool run();
+        bool wakeup();
+    }; // end class SimpleSocketServer
 } // end namespace nio
 
 
