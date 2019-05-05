@@ -281,18 +281,19 @@ namespace nio
      */
     class SimpleSocketServer {
         class ImplClass;
-        std::unique_ptr<ImplClass> m_ptrImpl;
+        ImplClass * m_impl;
+
     public:
-        typedef std::function<bool (int sfd, int cfd, const net::Location * remote )> ListenerCallback;
-        typedef std::function<void (int fd, int status, const io::ConstBuffer & buffer)> SendCallback;
-        typedef std::function<void (int fd, int status, const io::MutableBuffer & buffer)> RecvCallback;
+        typedef std::function<void (int sfd, int cfd, const net::Location * remote )> ListenerCallback;
+        typedef std::function<void (int fd, int status, io::ConstBuffer & buffer)> SendCallback;
+        typedef std::function<void (int fd, int status, io::MutableBuffer & buffer)> RecvCallback;
         typedef std::function<void (int fd)> CloseCallback; 
         typedef std::function<void (int status)> ServerCallback;
     
     public:
         SimpleSocketServer();
 
-        int  addListener(const net::Location &loc, const ListenerCallback & callback);
+        int  addListener(const net::Location &loc, const ListenerCallback & callback, err::Error * error);
 
         int  send(int channel, const io::ConstBuffer & buffer);
         int  receive(int channel, io::MutableBuffer & buffer);
@@ -302,9 +303,10 @@ namespace nio
         int  closeChannel(int fd);
 
         void setServerCallback(ServerCallback & callback);
-        bool setChannelCallback(int fd, RecvCallback & rcb, SendCallback & scb, CloseCallback ccb);
+        bool acceptChannel(int fd, const RecvCallback & rcb, const SendCallback & scb, const CloseCallback &ccb, err::Error * e);
 
-        bool run();
+        bool run(err::Error * e);
+        void exitLoop();
         bool wakeup();
     }; // end class SimpleSocketServer
 } // end namespace nio
