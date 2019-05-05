@@ -31,15 +31,30 @@ namespace io {
     buffer_t * buffer_pullup(buffer_t *buf);
 
     /// big endian to host endian
-    int32_t byteorder_btoh(int32_t n);
+    int32_t btoh(int32_t n);
+    int64_t btoh(int64_t n);
 
     class ConstBuffer {};
-    class MutableBuffer {};
+    class MutableBuffer {
+    public:
+        char * data();
+        size_t capacity() const;
+        size_t size() const;
+        size_t limit() const;
+
+        void resize(size_t n);
+        void limit(size_t n);
+
+        void attach(char * p, size_t cap);
+        char * detach();
+
+        void rewind();
+    };
 
 } // end namespace io
 
 inline 
-int32_t io::byteorder_btoh(int32_t n) {
+int32_t io::btoh(int32_t n) {
 # ifdef HOST_BIG_ENDIAN
 # error("big-endian not supported")
 # else 
@@ -50,6 +65,26 @@ int32_t io::byteorder_btoh(int32_t n) {
     p1[1] = p0[2];
     p1[2] = p0[1];
     p1[3] = p0[0];
+    return r;
+# endif
+}
+
+inline 
+int64_t io::btoh(int64_t n) {
+# ifdef HOST_BIG_ENDIAN
+# error("big-endian not supported")
+# else 
+    int64_t r;
+    unsigned char * p0 = (unsigned char *)&n;
+    unsigned char * p1 = (unsigned char *)&r;
+    p1[0] = p0[7];
+    p1[1] = p0[6];
+    p1[2] = p0[5];
+    p1[3] = p0[4];
+    p1[4] = p0[3];
+    p1[5] = p0[2];
+    p1[6] = p0[1];
+    p1[7] = p0[0];
     return r;
 # endif
 }
