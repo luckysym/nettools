@@ -13,6 +13,14 @@ public:
     void operator()(int sfd, int cfd, const net::Location * remote);
 };
 
+class RecvCallback
+{
+private:
+    nio::SimpleSocketServer & m_server;
+public:
+    RecvCallback(nio::SimpleSocketServer & server) : m_server(server) {}
+    bool operator()(int fd, int status, io::MutableBuffer & buffer);
+};
 
 class SendCallback
 {
@@ -21,15 +29,6 @@ private:
 public:
     SendCallback(nio::SimpleSocketServer & server) : m_server(server) {}
     void operator()(int fd, int status, io::ConstBuffer & buffer);
-};
-
-class RecvCallback
-{
-private:
-    nio::SimpleSocketServer & m_server;
-public:
-    RecvCallback(nio::SimpleSocketServer & server) : m_server(server) {}
-    void operator()(int fd, int status, io::MutableBuffer & buffer);
 };
 
 class CloseCallback
@@ -41,6 +40,15 @@ public:
     void operator()(int fd);
 };
 
+class TimerCallback
+{
+private:
+    nio::SimpleSocketServer & m_server;
+public:
+    TimerCallback(nio::SimpleSocketServer & server) : m_server(server) {}
+    void operator()(int fd);
+};
+
 int main(int argc, char **argv)
 {
     err::Error e;
@@ -48,12 +56,11 @@ int main(int argc, char **argv)
 
     net::Location loc("0.0.0.0", 8899, &e);
 
-    ListenerCallback lcb(server);
-    int listenerId = server.addListener(loc, lcb, &e);
+    
+    int listenerId = server.addListener(loc, ListenerCallback(server), &e);
 
-    while (1) {
-        int r = server.run(&e);
-    }
+    server.addTimer(1000, TimerCallback(server), &e); 
+    server.run(&e);
 
     return 0;
 }
@@ -71,3 +78,64 @@ void ListenerCallback::operator()(int sfd, int cfd, const net::Location * remote
     m_server.acceptChannel(cfd, RecvCallback(m_server), SendCallback(m_server), CloseCallback(m_server), &error);
 }
 
+bool RecvCallback::operator()(int fd, int status, io::MutableBuffer & buffer) 
+{
+    if ( status != 0 ) {
+        // 读消息失败，channel关闭
+        SYM_TRACE_VA("[error] channel read error, fd: %d", fd);
+        if ( buffer.data()) free(buffer.detach());
+        m_server.closeChannel(fd);
+        return false;  // 回调后不再接收消息
+    }
+
+    // 一般首次读消息时，缓存还没分配，先分配缓存
+    if ( buffer.data() == nullptr ) {
+        char * p = (char *)malloc(1024);
+        buffer.attach(p, 1024);   // 缓存挂到buffer
+        buffer.resize(0);         // 有效数据为0
+        buffer.limit(sizeof(srpc::message_header_t));  // 先接收报文头
+        return true;   // 回调后自动继续接收
+    }
+
+    // 后续缓存已经分配，就检查收到的数据
+    srpc::message_t * msg = (srpc::message_t*)buffer.data();
+    bool isok = message_check_magic(msg);
+    if ( !isok ) {
+        // 消息头magic不正确，连接需要关闭
+        SYM_TRACE_VA("[error] channel message error, fd: %d", fd);
+        free(buffer.detach());
+        m_server.closeChannel(fd);
+        return false;
+    }
+
+    // 检查收到的消息长度，是否接收完整。
+    size_t rsize = buffer.size();
+    size_t msize = io::btoh(msg->header.length);
+    if ( rsize == msize ) {
+        // 消息总长等于收到的长度，当前消息接收完成
+        SYM_TRACE_VA("[info] message received, fd: %d, timestamp: %lld， len: %d", 
+            fd, io::btoh(msg->header.timestamp), (int)msize);
+        buffer.rewind();  // 缓存倒回, limit = cap, size = 0;
+        buffer.limit(sizeof(srpc::message_header_t));
+        return true;  // 接续接收
+    }
+
+    // 消息长度和当前收到的不一致，通常是收到消息头，需要扩充内存，继续接收
+    assert( msize > rsize);   // 这里必然 msize > rsize, 收到的比消息总长还长，就有问题了
+    if ( rsize == sizeof(srpc::message_header_t) ) {
+
+        // 收到了包头，但还有包体要收，如果缓存不够，就扩充
+        // 包总长等于包头长度，则是个空包，按以完成处理。
+        
+        if ( msize > buffer.capacity()) {
+            char * p = (char *)realloc(buffer.data(), msize);
+            buffer.attach(p, msize);
+            buffer.resize(rsize);
+        }
+        buffer.limit(msize);
+        return true; // 继续收包体
+    } else {
+        // 收到了一半消息体或消息头，一般不会有这种问题。
+        assert("bad message length" == nullptr);
+    }
+}
