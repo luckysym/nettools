@@ -26,12 +26,16 @@ namespace err {
 
     void trace_stderr(const char * file, int line, const char * format, ...);
 
+    class Error { };
+
 } // end namespace sl
 
 /// \def SYM_TRACE(msg)
 /// 用于输出过程跟踪信息。
 #define SYM_TRACE(msg) err::trace_stderr(__FILE__, __LINE__, msg) 
 #define SYM_TRACE_VA(fmt, ...) err::trace_stderr(__FILE__, __LINE__, fmt, __VA_ARGS__) 
+
+#define SYM_NOTIMPL(name) assert( name" not impl" == nullptr)
 
 inline
 void err::trace_stderr(const char * file, int line, const char * format, ...)
