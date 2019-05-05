@@ -286,22 +286,24 @@ namespace nio
     public:
         typedef std::function<void (int sfd, int cfd, const net::Location * remote )> ListenerCallback;
         typedef std::function<void (int fd, int status, io::ConstBuffer & buffer)> SendCallback;
-        typedef std::function<void (int fd, int status, io::MutableBuffer & buffer)> RecvCallback;
+        typedef std::function<bool (int fd, int status, io::MutableBuffer & buffer)> RecvCallback;
         typedef std::function<void (int fd)> CloseCallback; 
         typedef std::function<void (int status)> ServerCallback;
+        typedef std::function<void (int timer)> TimerCallback;
     
     public:
         SimpleSocketServer();
 
         int  addListener(const net::Location &loc, const ListenerCallback & callback, err::Error * error);
-
-        int  send(int channel, const io::ConstBuffer & buffer);
-        int  receive(int channel, io::MutableBuffer & buffer);
-        int  receiveSome(int channel, io::MutableBuffer & buffer);
+        int  addTimer(int interval, const TimerCallback & cb, err::Error * e);
         
         int  closeListener(int fd);
         int  closeChannel(int fd);
+        int  closeTimer(int timer);
 
+        int  send(int channel, const io::ConstBuffer & buffer, err::Error * e);
+        int  send(int channel, const io::ConstBuffer & buffer, int64_t expire, err::Error * e);
+        
         void setServerCallback(ServerCallback & callback);
         bool acceptChannel(int fd, const RecvCallback & rcb, const SendCallback & scb, const CloseCallback &ccb, err::Error * e);
 
