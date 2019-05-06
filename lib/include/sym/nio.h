@@ -289,7 +289,7 @@ namespace nio
         typedef std::function<bool (int fd, int status, io::MutableBuffer & buffer)> RecvCallback;
         typedef std::function<void (int fd)> CloseCallback; 
         typedef std::function<void (int status)> ServerCallback;
-        typedef std::function<void (int timer)> TimerCallback;
+        typedef std::function<bool (int timer)> TimerCallback;
     
     public:
         SimpleSocketServer();
@@ -304,9 +304,11 @@ namespace nio
         int  send(int channel, const io::ConstBuffer & buffer, err::Error * e);
         int  send(int channel, const io::ConstBuffer & buffer, int64_t expire, err::Error * e);
         
-        void setServerCallback(ServerCallback & callback);
+        void setIdleInterval(int interval); 
+        void setServerCallback(const ServerCallback & callback);
         bool acceptChannel(int fd, const RecvCallback & rcb, const SendCallback & scb, const CloseCallback &ccb, err::Error * e);
 
+        
         bool run(err::Error * e);
         void exitLoop();
         bool wakeup();
