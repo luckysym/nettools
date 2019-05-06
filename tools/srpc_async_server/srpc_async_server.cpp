@@ -50,7 +50,18 @@ private:
     nio::SimpleSocketServer & m_server;
 public:
     TimerCallback(nio::SimpleSocketServer & server) : m_server(server) {}
-    void operator()(int fd);
+    
+    bool operator()(int fd) {
+        SYM_TRACE_VA("[trace] TimerCallback, timer %d", fd);
+    }
+};
+
+class ServerCallback 
+{
+public:
+    void operator()(int status) {
+        SYM_TRACE_VA("[trace] ServerCallback, status %d", status);
+    }
 };
 
 int main(int argc, char **argv)
@@ -58,9 +69,10 @@ int main(int argc, char **argv)
     err::Error e;
     nio::SimpleSocketServer server;
 
+    server.setServerCallback(ServerCallback());
+    server.setIdleInterval(10);    // 10s空闲回调。
     net::Location loc("0.0.0.0", 8899, &e);
 
-    
     int listenerId = server.addListener(loc, ListenerCallback(server), &e);
 
     server.addTimer(1000, TimerCallback(server), &e); 
@@ -165,9 +177,19 @@ void SendCallback::operator()(int fd, int status, io::ConstBuffer & buffer)
 {
     // 发送回复数据完成，释放缓存，关闭连接。
     const srpc::message_t * msg = (const srpc::message_t*)buffer.data();
-    SYM_TRACE_VA("[info] message response sent, fd: %d, timestamp: %lld", 
+    if ( status == 0 ) {
+        SYM_TRACE_VA("[info] message response sent, fd: %d, timestamp: %lld", 
             fd, io::btoh(msg->header.timestamp));
+    } else {
+        SYM_TRACE_VA("[error] message response send failed, fd: %d, timestamp: %lld", 
+            fd, io::btoh(msg->header.timestamp));
+    }
 
     free((void *)buffer.detach());
     m_server.closeChannel(fd);
+}
+
+void CloseCallback::operator()(int fd)
+{
+    SYM_TRACE_VA("[info] channel closed, fd: %d", fd);
 }
