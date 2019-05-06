@@ -34,7 +34,24 @@ namespace io {
     int32_t btoh(int32_t n);
     int64_t btoh(int64_t n);
 
-    class ConstBuffer {};
+    /// \brief 只读缓存对象，通常用于IO发送数据。
+    class ConstBuffer {
+    public:
+        ConstBuffer(const char * data, size_t size);
+
+        const char * data() const;
+        size_t size() const;
+        size_t position() const;
+
+        void position(size_t pos);
+
+        void attach(const char *data, size_t size);
+        const char * detach();
+
+        void rewind();    // pos = 0;
+    }; // end class ConstBuffer
+
+    /// \brief 可写入的缓存对象，通常用于接受IO数据。
     class MutableBuffer {
     public:
         char * data();
@@ -45,10 +62,10 @@ namespace io {
         void resize(size_t n);
         void limit(size_t n);
 
-        void attach(char * p, size_t cap);
+        void attach(char * data, size_t cap);
         char * detach();
 
-        void rewind();
+        void reset();    // limie=size=0;
     };
 
 } // end namespace io
