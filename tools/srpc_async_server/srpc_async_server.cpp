@@ -17,8 +17,12 @@ class RecvCallback
 {
 private:
     nio::SimpleSocketServer & m_server;
+    int  m_sendTimeout;
 public:
-    RecvCallback(nio::SimpleSocketServer & server) : m_server(server) {}
+    RecvCallback(nio::SimpleSocketServer & server, int sendtimeout = 5000) 
+        : m_server(server) , m_sendTimeout(sendtimeout) {}
+
+    void sendResponse(int fd, const char * data, size_t len);
     bool operator()(int fd, int status, io::MutableBuffer & buffer);
 };
 
@@ -115,7 +119,11 @@ bool RecvCallback::operator()(int fd, int status, io::MutableBuffer & buffer)
         // 消息总长等于收到的长度，当前消息接收完成
         SYM_TRACE_VA("[info] message received, fd: %d, timestamp: %lld， len: %d", 
             fd, io::btoh(msg->header.timestamp), (int)msize);
-        buffer.rewind();  // 缓存倒回, limit = cap, size = 0;
+        
+        // 将消息发回
+        this->sendResponse(fd, buffer.data(), buffer.size());
+        
+        buffer.reset();  // 缓存倒回, limit = cap, size = 0;
         buffer.limit(sizeof(srpc::message_header_t));
         return true;  // 接续接收
     }
@@ -132,10 +140,34 @@ bool RecvCallback::operator()(int fd, int status, io::MutableBuffer & buffer)
             buffer.attach(p, msize);
             buffer.resize(rsize);
         }
+
         buffer.limit(msize);
         return true; // 继续收包体
     } else {
         // 收到了一半消息体或消息头，一般不会有这种问题。
         assert("bad message length" == nullptr);
     }
+}
+
+void RecvCallback::sendResponse(int fd, const char * data, size_t len) 
+{
+    char * outdata = (char *)malloc(len);
+    memcpy(outdata, data, len);
+
+    err::Error e;
+    io::ConstBuffer buffer(outdata, len);
+    bool isok = m_server.send(fd, buffer, m_sendTimeout, &e);
+    assert( isok );
+    return ;
+}
+
+void SendCallback::operator()(int fd, int status, io::ConstBuffer & buffer)
+{
+    // 发送回复数据完成，释放缓存，关闭连接。
+    const srpc::message_t * msg = (const srpc::message_t*)buffer.data();
+    SYM_TRACE_VA("[info] message response sent, fd: %d, timestamp: %lld", 
+            fd, io::btoh(msg->header.timestamp));
+
+    free((void *)buffer.detach());
+    m_server.closeChannel(fd);
 }
