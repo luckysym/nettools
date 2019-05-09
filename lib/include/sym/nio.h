@@ -270,6 +270,20 @@ namespace nio
         void listener_event_callback(int sfd, int events, void *arg);
     }
 
+    class Selector {
+    public:
+        bool remove(int fd, err::Error * e = nullptr);
+    }; // end class Selector
+
+    class SocketChannel {
+    public:
+        bool close(err::Error * e = nullptr);
+    }; // end class SocketChannel
+
+    class SocketListener {
+
+    }; // end class SocketListener
+
     /**
      * @brief 简单的Socket服务端类。
      * 
@@ -290,23 +304,31 @@ namespace nio
         typedef std::function<void (int fd)> CloseCallback; 
         typedef std::function<void (int status)> ServerCallback;
         typedef std::function<bool (int timer)> TimerCallback;
-    
+
+        enum {
+            shutdownRead  = 1,
+            shutdownWrite = 2,
+            shutdownBoth  = shutdownRead + shutdownWrite
+        };
+
     public:
         SimpleSocketServer();
+        ~SimpleSocketServer();
 
-        int  addListener(const net::Location &loc, const ListenerCallback & callback, err::Error * error);
-        int  addTimer(int interval, const TimerCallback & cb, err::Error * e);
+        int  addListener(const net::Location &loc, const ListenerCallback & callback, err::Error * e = nullptr);
+        int  addTimer(int interval, const TimerCallback & cb, err::Error * e = nullptr);
         
-        int  closeListener(int fd);
-        int  closeChannel(int fd);
-        int  closeTimer(int timer);
+        bool  shutdownChannel(int fd, int how, err::Error * e = nullptr);
+        bool  closeChannel(int fd, err::Error * e = nullptr);
+        bool  closeListener(int fd, err::Error * e = nullptr);
+        bool  closeTimer(int timer, err::Error * e = nullptr);
 
-        int  send(int channel, const io::ConstBuffer & buffer, err::Error * e);
-        int  send(int channel, const io::ConstBuffer & buffer, int64_t expire, err::Error * e);
+        int  send(int channel, const io::ConstBuffer & buffer, err::Error * e = nullptr);
+        int  send(int channel, const io::ConstBuffer & buffer, int64_t expire, err::Error * e = nullptr);
         
         void setIdleInterval(int interval); 
         void setServerCallback(const ServerCallback & callback);
-        bool acceptChannel(int fd, const RecvCallback & rcb, const SendCallback & scb, const CloseCallback &ccb, err::Error * e);
+        bool acceptChannel(int fd, const RecvCallback & rcb, const SendCallback & scb, const CloseCallback &ccb, err::Error * e = nullptr);
 
         
         bool run(err::Error * e);
@@ -316,4 +338,27 @@ namespace nio
 } // end namespace nio
 
 
+namespace nio 
+{
+    class SimpleSocketServer::ImplClass {
+    public:
+        Selector m_selector;
+    public:
+        SocketChannel * getChannel(int fd);
+    }; // end classs SimpleSocketServer::ImplClass
 
+} // end namespace nio
+
+namespace nio 
+{
+    inline
+    bool SimpleSocketServer::closeChannel(int fd, err::Error * e) 
+    {
+        SocketChannel * channel = m_impl->getChannel(fd);
+        assert(channel);
+        m_impl->m_selector.remove( fd, e);   // remove fd from selector synchronized
+        channel->close();     // close the channel and then release it
+        delete channel;
+        return true;
+    }
+} // end namespace nio
