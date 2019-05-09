@@ -18,6 +18,7 @@ class RecvCallback
 private:
     nio::SimpleSocketServer & m_server;
     int  m_sendTimeout;
+
 public:
     RecvCallback(nio::SimpleSocketServer & server, int sendtimeout = 5000) 
         : m_server(server) , m_sendTimeout(sendtimeout) {}
@@ -75,7 +76,7 @@ int main(int argc, char **argv)
 
     int listenerId = server.addListener(loc, ListenerCallback(server), &e);
 
-    server.addTimer(1000, TimerCallback(server), &e); 
+    // server.addTimer(1000, TimerCallback( server ), &e); 
     server.run(&e);
 
     return 0;
@@ -186,10 +187,11 @@ void SendCallback::operator()(int fd, int status, io::ConstBuffer & buffer)
     }
 
     free((void *)buffer.detach());
-    m_server.closeChannel(fd);
+    m_server.shutdownChannel(fd, nio::SimpleSocketServer::shutdownBoth);
 }
 
 void CloseCallback::operator()(int fd)
 {
     SYM_TRACE_VA("[info] channel closed, fd: %d", fd);
+    m_server.closeChannel(fd);
 }
