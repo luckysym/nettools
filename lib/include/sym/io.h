@@ -34,39 +34,94 @@ namespace io {
     int32_t btoh(int32_t n);
     int64_t btoh(int64_t n);
 
-    /// \brief 只读缓存对象，通常用于IO发送数据。
-    class ConstBuffer {
+
+    class BufferBase {
+    private:
+        size_t   m_capacity;
+        size_t   m_size;
+        size_t   m_position;
+        size_t   m_limit;
+
     public:
-        ConstBuffer(const char * data, size_t size);
+        BufferBase() : m_capacity(0), m_size(0), m_position(0), m_limit(0) {}
 
-        const char * data() const;
-        size_t size() const;
-        size_t position() const;
+        BufferBase(size_t cap) : m_capacity(cap), m_size(0), m_position(0), m_limit(cap) {}
+        
+        BufferBase(size_t cap, size_t size) 
+            : m_capacity(cap), m_size(size), m_position(0), m_limit(cap) {}
+        
+        size_t capacity() const { return m_capacity; }
+        size_t size() const { return m_size; }
+        size_t position() const { return m_position; }
+        size_t limit() const { return m_limit; }
 
-        void position(size_t pos);
+        void resize(size_t n)   { assert(n <= m_capacity); m_size = n; }
+        void position(size_t n) { assert(n <= m_size && n <= m_limit); m_position = n; }
+        void limit(size_t n)    { assert(n <= m_capacity); m_limit = n; m_position = m_position > m_limit?m_limit:m_position; }
+        
+    }; // end class BufferBase 
 
-        void attach(const char *data, size_t size);
-        const char * detach();
+    /// \brief 只读缓存对象，通常用于IO发送数据。
+    class ConstBuffer : public BufferBase {
+    private:
+        const char * m_data { nullptr };
 
-        void rewind();    // pos = 0;
+    public:
+        ConstBuffer() {}
+        ConstBuffer(const char * data, size_t size) : BufferBase(size, size), m_data(data) {}
+        ConstBuffer(const char * data, size_t size, size_t cap) : BufferBase(cap, size), m_data(data) 
+        {
+            BufferBase::limit(size);
+        }
+
+        const char * data() const { return m_data; }
+        
+        void attach(const char *data, size_t size) {
+            *(BufferBase*)this = BufferBase(size);
+            m_data = data;
+        }
+
+        void attach(const char *data, size_t size, size_t cap) {
+            *(BufferBase*)this = BufferBase(size, cap);
+            m_data = data;
+        }
+
+        const char * detach() {
+            const char * p = m_data;
+            m_data = nullptr;
+            *(BufferBase*)this = BufferBase();
+            return p;
+        }
+
+        void rewind() { BufferBase::position(0); }
+        
     }; // end class ConstBuffer
 
     /// \brief 可写入的缓存对象，通常用于接受IO数据。
-    class MutableBuffer {
+    class MutableBuffer : public BufferBase {
+    private:
+        char * m_data { nullptr };
     public:
-        char * data();
-        size_t capacity() const;
-        size_t size() const;
-        size_t limit() const;
+        MutableBuffer() {}
+        MutableBuffer(char * data, size_t cap) : BufferBase(cap), m_data(data) {}
+        MutableBuffer(char * data, size_t cap, size_t size) : BufferBase(cap, size), m_data(data) {}
 
-        void resize(size_t n);
-        void limit(size_t n);
+        char * data() { return m_data; }
 
-        void attach(char * data, size_t cap);
+        void attach(char * data, size_t cap) {
+            *(BufferBase*)this = BufferBase(cap);
+            m_data = data;
+        }
+
+        void attach(char *data, size_t size, size_t cap) {
+            *(BufferBase*)this = BufferBase(size, cap);
+            m_data = data;
+        }
+
         char * detach();
 
-        void reset();    // limie=size=0;
-    };
+        void reset()  { BufferBase::position(0), BufferBase::limit(BufferBase::capacity()); }
+    }; // end MutableBuffer
 
 } // end namespace io
 
