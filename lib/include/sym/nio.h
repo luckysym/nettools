@@ -270,19 +270,21 @@ namespace nio
         void listener_event_callback(int sfd, int events, void *arg);
     }
 
+
+    const int selectNone     = 0;
+    const int selectRead     = 1;
+    const int selectWrite    = 2;
+    const int selectTimeout  = 4;
+    const int selectError    = 8;
+
     class Selector {
     public:
+        bool add(int fd, int events, void * data, err::Error * e = nullptr);
         bool remove(int fd, err::Error * e = nullptr);
     }; // end class Selector
 
-    class SocketChannel {
-    public:
-        bool close(err::Error * e = nullptr);
-    }; // end class SocketChannel
-
-    class SocketListener {
-
-    }; // end class SocketListener
+    class SocketChannel;
+    class SocketListener;
 
     /**
      * @brief 简单的Socket服务端类。
@@ -301,9 +303,9 @@ namespace nio
         typedef std::function<void (int sfd, int cfd, const net::Location * remote )> ListenerCallback;
         typedef std::function<void (int fd, int status, io::ConstBuffer & buffer)> SendCallback;
         typedef std::function<bool (int fd, int status, io::MutableBuffer & buffer)> RecvCallback;
-        typedef std::function<void (int fd)> CloseCallback; 
+        typedef std::function<void (int fd)>     CloseCallback; 
         typedef std::function<void (int status)> ServerCallback;
-        typedef std::function<bool (int timer)> TimerCallback;
+        typedef std::function<bool (int timer)>  TimerCallback;
 
         enum {
             shutdownRead  = 1,
@@ -315,35 +317,75 @@ namespace nio
         SimpleSocketServer();
         ~SimpleSocketServer();
 
-        int  addListener(const net::Location &loc, const ListenerCallback & callback, err::Error * e = nullptr);
-        int  addTimer(int interval, const TimerCallback & cb, err::Error * e = nullptr);
+        int   acceptChannel(int fd, const RecvCallback & rcb, const SendCallback & scb, const CloseCallback &ccb, err::Error * e = nullptr);
+
+        int   addListener(const net::Location &loc, const ListenerCallback & callback, err::Error * e = nullptr);
+
+        int   addTimer(int interval, const TimerCallback & cb, err::Error * e = nullptr);
         
-        bool  shutdownChannel(int fd, int how, err::Error * e = nullptr);
+        void  exitLoop();
+
         bool  closeChannel(int fd, err::Error * e = nullptr);
         bool  closeListener(int fd, err::Error * e = nullptr);
         bool  closeTimer(int timer, err::Error * e = nullptr);
 
-        int  send(int channel, const io::ConstBuffer & buffer, err::Error * e = nullptr);
-        int  send(int channel, const io::ConstBuffer & buffer, int64_t expire, err::Error * e = nullptr);
+        int   send(int channel, const io::ConstBuffer & buffer, err::Error * e = nullptr);
+        int   send(int channel, const io::ConstBuffer & buffer, int64_t expire, err::Error * e = nullptr);
         
-        void setIdleInterval(int interval); 
-        void setServerCallback(const ServerCallback & callback);
-        bool acceptChannel(int fd, const RecvCallback & rcb, const SendCallback & scb, const CloseCallback &ccb, err::Error * e = nullptr);
+        void  setIdleInterval(int interval); 
+        void  setServerCallback(const ServerCallback & callback);
+        
+        bool  shutdownChannel(int fd, int how, err::Error * e = nullptr);
 
-        
-        bool run(err::Error * e);
-        void exitLoop();
-        bool wakeup();
+        bool  run(err::Error * e);
+        bool  wakeup();
     }; // end class SimpleSocketServer
 } // end namespace nio
 
+#include <unordered_map>
 
 namespace nio 
 {
+    class SocketChannel {
+    public:
+        SocketChannel(int fd);
+        ~SocketChannel();
+        bool close(err::Error * e = nullptr);
+    }; // end class SocketChannel
+
+    class SocketListener {
+    public:
+        SocketListener();
+        ~SocketListener();
+        int fd() const;
+        bool open(const net::Location & localAddr, err::Error * e);
+    }; // end class SocketListener
+
     class SimpleSocketServer::ImplClass {
     public:
-        Selector m_selector;
+        struct ListenerEntry {
+            SocketListener * listener;
+            ListenerCallback callback;
+        };
+        struct ChannelEntry {
+            SocketChannel * channel;
+            RecvCallback    recvCb;
+            SendCallback    sendCb;
+            CloseCallback   closeCb;
+        };
+        using ChannelMap  = std::unordered_map<int, ChannelEntry>;
+        using ListenerMap = std::unordered_map<int, ListenerEntry>;
     public:
+        Selector       m_selector;
+        ListenerMap    m_listenerMap;
+        ChannelMap     m_channelMap;
+        int            m_idleInterval {-1};
+        ServerCallback m_serverCb;
+
+    public:
+        ImplClass();
+        ~ImplClass();
+
         SocketChannel * getChannel(int fd);
     }; // end classs SimpleSocketServer::ImplClass
 
@@ -351,6 +393,63 @@ namespace nio
 
 namespace nio 
 {
+    inline 
+    SimpleSocketServer::SimpleSocketServer() 
+        : m_impl(new ImplClass)
+    {
+    }
+
+    inline 
+    SimpleSocketServer::~SimpleSocketServer()
+    {
+        if ( m_impl ) {
+            delete m_impl;
+            m_impl = nullptr;
+        }
+    }
+
+    inline
+    int SimpleSocketServer::acceptChannel (
+        int fd, 
+        const RecvCallback &rcb, 
+        const SendCallback & scb, 
+        const CloseCallback & ccb, 
+        err::Error * e )
+    {
+        std::unique_ptr<SocketChannel> ptrChannel(new SocketChannel(fd));
+        bool isok = m_impl->m_selector.add(fd, selectRead, ptrChannel.get(), e);
+        assert( isok );
+
+        auto it = m_impl->m_channelMap.find(fd);
+        assert ( it == m_impl->m_channelMap.end() );
+        ImplClass::ChannelEntry entry { ptrChannel.release(), rcb, scb, ccb};
+        m_impl->m_channelMap[fd] = entry;
+        return fd;
+    }
+
+    inline 
+    int SimpleSocketServer::addListener(const net::Location & localAddr, const ListenerCallback & cb, err::Error * e)
+    {
+        std::unique_ptr<SocketListener> ptrListener(new SocketListener());
+        bool isok = ptrListener->open(localAddr, e);
+        if ( !isok ) {
+            return false;
+        }
+
+        // 监听成功, 注册到Selector，然后放入表中，最后返回监听器描述字表示当前监听器的ID。
+        //
+        int fd = ptrListener->fd();
+        isok = m_impl->m_selector.add(fd, selectRead, ptrListener.get(), e);
+        assert( isok );
+
+        auto it = m_impl->m_listenerMap.find(ptrListener->fd());
+        assert( it == m_impl->m_listenerMap.end());
+
+        ImplClass::ListenerEntry entry{ptrListener.release(), cb};
+        m_impl->m_listenerMap[ fd ] = entry;
+        return fd;
+    }
+
     inline
     bool SimpleSocketServer::closeChannel(int fd, err::Error * e) 
     {
@@ -361,4 +460,17 @@ namespace nio
         delete channel;
         return true;
     }
+
+    inline 
+    void SimpleSocketServer::setIdleInterval(int ms) 
+    {
+        m_impl->m_idleInterval = ms;
+    }
+
+    inline
+    void SimpleSocketServer::setServerCallback(const ServerCallback & cb)
+    {
+        m_impl->m_serverCb = cb;
+    }
+
 } // end namespace nio
