@@ -58,7 +58,11 @@ namespace io {
         void resize(size_t n)   { assert(n <= m_capacity); m_size = n; }
         void position(size_t n) { assert(n <= m_size && n <= m_limit); m_position = n; }
         void limit(size_t n)    { assert(n <= m_capacity); m_limit = n; m_position = m_position > m_limit?m_limit:m_position; }
-        
+    
+    protected:
+        void init() {
+            m_capacity = m_size = m_position = m_limit = 0;
+        }
     }; // end class BufferBase 
 
     /// \brief 只读缓存对象，通常用于IO发送数据。
@@ -89,7 +93,7 @@ namespace io {
         const char * detach() {
             const char * p = m_data;
             m_data = nullptr;
-            *(BufferBase*)this = BufferBase();
+            BufferBase::init();
             return p;
         }
 
@@ -118,7 +122,12 @@ namespace io {
             m_data = data;
         }
 
-        char * detach();
+        char * detach() { 
+            char * p = m_data;
+            BufferBase::init();
+            m_data = nullptr;
+            return p;
+        }
 
         void reset()  { BufferBase::position(0), BufferBase::limit(BufferBase::capacity()); }
     }; // end MutableBuffer
