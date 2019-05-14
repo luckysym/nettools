@@ -169,7 +169,7 @@ void RecvCallback::sendResponse(int fd, const char * data, size_t len)
 
     err::Error e;
     io::ConstBuffer buffer(outdata, len);
-    bool isok = m_server.send(fd, buffer, m_sendTimeout, &e);
+    bool isok = m_server.send(fd, buffer, &e);
     assert( isok );
     return ;
 }

@@ -26,7 +26,12 @@ namespace err {
 
     void trace_stderr(const char * file, int line, const char * format, ...);
 
-    class Error { };
+    class Error { 
+    public:
+        Error();
+        Error(int code, const char * message);
+        ~Error();
+    }; // end class Error
 
 } // end namespace sl
 

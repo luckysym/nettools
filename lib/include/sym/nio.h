@@ -288,6 +288,7 @@ namespace nio
     public:
         bool add(int fd, int events, void * data, err::Error * e = nullptr);
         bool remove(int fd, err::Error * e = nullptr);
+        bool set(int fd, int events, err::Error * e = nullptr);
         int  wait(int ms, err::Error * e = nullptr);
         Event * revents(int i);
     }; // end class Selector
@@ -330,16 +331,12 @@ namespace nio
 
         int   addListener(const net::Location &loc, const ListenerCallback & callback, err::Error * e = nullptr);
 
-        int   addTimer(int interval, const TimerCallback & cb, err::Error * e = nullptr);
-        
         void  exitLoop();
 
         bool  closeChannel(int fd, err::Error * e = nullptr);
         bool  closeListener(int fd, err::Error * e = nullptr);
-        bool  closeTimer(int timer, err::Error * e = nullptr);
 
-        int   send(int channel, const io::ConstBuffer & buffer, err::Error * e = nullptr);
-        int   send(int channel, const io::ConstBuffer & buffer, int64_t expire, err::Error * e = nullptr);
+        bool  send(int channel, io::ConstBuffer & buffer, err::Error * e = nullptr);
         
         void  setIdleInterval(int interval); 
         void  setServerCallback(const ServerCallback & callback);
@@ -375,6 +372,7 @@ namespace nio
         SocketChannel(int fd);
         ~SocketChannel();
         bool close(err::Error * e = nullptr);
+        int  pushOutputQueue(const io::ConstBuffer & buf);
     }; // end class SocketChannel
 
     class SocketListener : public IoBase {
@@ -493,6 +491,11 @@ namespace nio
     }
 
     inline 
+    void SimpleSocketServer::exitLoop() {
+        m_impl->m_exitloop = true;
+    }
+
+    inline 
     void SimpleSocketServer::setIdleInterval(int ms) 
     {
         m_impl->m_idleInterval = ms;
@@ -504,10 +507,6 @@ namespace nio
         m_impl->m_serverCb = cb;
     }
 
-    inline 
-    void SimpleSocketServer::exitLoop() {
-        m_impl->m_exitloop = true;
-    }
 
     inline
     bool SimpleSocketServer::run(err::Error * e)
@@ -538,6 +537,26 @@ namespace nio
         } // end while
 
         return true;
-    }
+    } // SimpleSocketServer::run
+
+    inline
+    bool SimpleSocketServer::send(int channel, io::ConstBuffer & buffer, err::Error * e)
+    {
+        auto it = m_impl->m_channelMap.find(channel);
+        if ( it == m_impl->m_channelMap.end()) {
+            if ( e ) *e = err::Error(-1, "channel id not exists");
+            return  false;
+        }
+
+        // 将buffer放入channel的输出队列，然后通知selector监听该channel的可写事件。
+        // 这里必须把buffer放入队列，按顺序send，不能先尝试发送该缓存消息，
+        // 不然当输出队列里还有发送缓存时，会造成消息错乱。
+        ImplClass::ChannelEntry & entry = it->second;
+        entry.channel->pushOutputQueue(buffer);
+        bool isok = m_impl->m_selector.set(channel, selectWrite, e);
+        return isok;
+    } 
+
+
 
 } // end namespace nio
