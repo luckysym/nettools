@@ -377,9 +377,11 @@ namespace nio
 
     class SocketListener : public IoBase {
     public:
+        net::Socket m_sock;
+    public:
         SocketListener();
         ~SocketListener();
-        int fd() const;
+        int fd() const { return m_sock.fd(); }
         bool open(const net::Location & localAddr, err::Error * e);
     }; // end class SocketListener
 
@@ -506,7 +508,6 @@ namespace nio
     {
         m_impl->m_serverCb = cb;
     }
-
 
     inline
     bool SimpleSocketServer::run(err::Error * e)

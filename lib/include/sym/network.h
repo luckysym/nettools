@@ -54,6 +54,11 @@ namespace net {
         Location(const char * host, int port, err::Error *e) { SYM_NOTIMPL("Location"); }
     }; // end class Location
 
+    class Socket{
+    public:
+        int fd() const;
+    }; // end class Socket
+
     /// init a location struct
     bool location_init(struct location *loc);
 
