@@ -279,8 +279,17 @@ namespace nio
 
     class Selector {
     public:
+        class Event
+        {
+        public:
+            int events() const;
+            void * data() const;
+        };
+    public:
         bool add(int fd, int events, void * data, err::Error * e = nullptr);
         bool remove(int fd, err::Error * e = nullptr);
+        int  wait(int ms, err::Error * e = nullptr);
+        Event * revents(int i);
     }; // end class Selector
 
     class SocketChannel;
@@ -346,14 +355,29 @@ namespace nio
 
 namespace nio 
 {
-    class SocketChannel {
+    enum class EnumIoType
+    {
+        ioSocketChannel,
+        ioSocketListener
+    };
+
+    class IoBase {
+    private:
+        EnumIoType m_type;
+    public:
+        IoBase( EnumIoType type ) : m_type(type) {}
+
+        EnumIoType type() const { return m_type; }
+    }; // end class IoBase
+
+    class SocketChannel : public IoBase {
     public:
         SocketChannel(int fd);
         ~SocketChannel();
         bool close(err::Error * e = nullptr);
     }; // end class SocketChannel
 
-    class SocketListener {
+    class SocketListener : public IoBase {
     public:
         SocketListener();
         ~SocketListener();
@@ -373,13 +397,16 @@ namespace nio
             SendCallback    sendCb;
             CloseCallback   closeCb;
         };
+
         using ChannelMap  = std::unordered_map<int, ChannelEntry>;
         using ListenerMap = std::unordered_map<int, ListenerEntry>;
+
     public:
         Selector       m_selector;
         ListenerMap    m_listenerMap;
         ChannelMap     m_channelMap;
         int            m_idleInterval {-1};
+        int            m_exitloop { false };
         ServerCallback m_serverCb;
 
     public:
@@ -387,6 +414,10 @@ namespace nio
         ~ImplClass();
 
         SocketChannel * getChannel(int fd);
+
+        void onListenerEvent(Selector::Event * event);
+        void onChannelEvent(Selector::Event * event);
+        void onServerIdle();
     }; // end classs SimpleSocketServer::ImplClass
 
 } // end namespace nio
@@ -471,6 +502,37 @@ namespace nio
     void SimpleSocketServer::setServerCallback(const ServerCallback & cb)
     {
         m_impl->m_serverCb = cb;
+    }
+
+    inline
+    bool SimpleSocketServer::run(err::Error * e)
+    {
+        m_impl->m_exitloop = false;
+        while ( !m_impl->m_exitloop ) {
+            int r = m_impl->m_selector.wait(m_impl->m_idleInterval, e);
+            if ( r > 0 ) {
+                for ( int i = 0; i < r; ++i ) {
+                    Selector::Event * event = m_impl->m_selector.revents(i);
+                    IoBase * base = (IoBase*)event->data();
+                    if ( base->type() == EnumIoType::ioSocketChannel) {
+                        m_impl->onChannelEvent(event);
+                    } else if ( base->type() == EnumIoType::ioSocketListener) {
+                        m_impl->onListenerEvent(event);
+                    } else {
+                        assert("unknown io type" == nullptr);
+                    }
+                } // end for
+            }
+            else if ( r == 0 ) {
+                m_impl->onServerIdle();
+                continue;
+            }
+            else {
+                return false;
+            }
+        } // end while
+
+        return true;
     }
 
 } // end namespace nio
