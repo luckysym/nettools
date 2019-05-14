@@ -504,6 +504,11 @@ namespace nio
         m_impl->m_serverCb = cb;
     }
 
+    inline 
+    void SimpleSocketServer::exitLoop() {
+        m_impl->m_exitloop = true;
+    }
+
     inline
     bool SimpleSocketServer::run(err::Error * e)
     {
