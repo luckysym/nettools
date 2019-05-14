@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <string>
 
 /// 包含异常错误以及过程跟踪相关数据结构和操作的名称空间。
 namespace err {
@@ -27,10 +28,14 @@ namespace err {
     void trace_stderr(const char * file, int line, const char * format, ...);
 
     class Error { 
+    private:
+        int         m_code;
+        std::string m_message;
+
     public:
-        Error();
-        Error(int code, const char * message);
-        ~Error();
+        Error() : m_code(0) {}
+        Error(int code, const char * message) : m_code(code), m_message(message) {}
+        ~Error() {}
     }; // end class Error
 
 } // end namespace sl
