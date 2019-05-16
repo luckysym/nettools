@@ -48,15 +48,18 @@ namespace net {
         char * path;
     } location_t;
 
-
     class Location {
     public:
         Location(const char * host, int port, err::Error *e) { SYM_NOTIMPL("Location"); }
     }; // end class Location
 
     class Socket{
+    private:
+        int m_fd {-1};
     public:
-        int fd() const;
+        Socket() {}
+        Socket(int fd) : m_fd(fd) {}
+        int fd() const  { return m_fd; }
     }; // end class Socket
 
     /// init a location struct
