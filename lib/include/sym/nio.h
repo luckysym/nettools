@@ -289,6 +289,7 @@ namespace nio
         bool add(int fd, int events, void * data, err::Error * e = nullptr);
         bool remove(int fd, err::Error * e = nullptr);
         bool set(int fd, int events, err::Error * e = nullptr);
+        bool cancel(int fd, int events, err::Error *e = nullptr);
         int  wait(int ms, err::Error * e = nullptr);
         Event * revents(int i);
     }; // end class Selector
@@ -324,7 +325,9 @@ namespace nio
         };
 
         enum {
-            statusIdle     ///< 服务空闲状态
+            statusOk     =  0,     ///< 正常状态
+            statusError  = -1,     ///< 错误状态
+            statusIdle   =  0      ///< 服务空闲状态，与statusOk相同
         };
 
     public:
@@ -378,10 +381,14 @@ namespace nio
         SocketChannel(int fd) : IoBase(EnumIoType::ioSocketChannel), m_sock(fd) {}
         ~SocketChannel();
 
+        int  fd() const { return m_sock.fd(); }
         bool close(err::Error * e = nullptr);
         bool shutdown(int how, err::Error *e = nullptr);
         int  shutdownFlags() const;
-        int  pushOutputQueue(const io::ConstBuffer & buf);
+        int  sendSome();
+        int  pushOutputBuffer(const io::ConstBuffer & buf);
+        io::ConstBuffer * peekOutputBuffer();
+        io::ConstBuffer * popOutputBuffer();
     }; // end class SocketChannel
 
     class SocketListener : public IoBase {
@@ -428,12 +435,60 @@ namespace nio
         void onListenerEvent(Selector::Event * event);
         void onChannelEvent(Selector::Event * event);
         void onServerIdle();
+
+    private:
+        void onChannelWritable(ChannelEntry & entry);
+        void onChannelReadable(ChannelEntry & entry);
+        void onChannelError(ChannelEntry & entry);
     }; // end classs SimpleSocketServer::ImplClass
 
 } // end namespace nio
 
 namespace nio
 {
+    inline 
+    void SimpleSocketServer::ImplClass::onChannelWritable(ChannelEntry & entry)
+    {
+        SocketChannel * channel = entry.channel;
+        ssize_t n = channel->sendSome();
+        io::ConstBuffer * buf = channel->peekOutputBuffer();
+        assert( buf );
+
+        if ( n >= 0 ) {
+            // 需要发送的数据发送完成, 执行回调，并将该缓存发送队列中取出
+            if ( buf->size() == buf->limit() ) {
+                entry.sendCb(channel->fd(), statusOk, *buf);
+                channel->popOutputBuffer();
+            }
+        } else {
+            // 发送失败, 执行失败回调。只回调输出当前buffer，其余buffer在shutdownWrite时逐个返回
+            entry.sendCb(channel->fd(), statusError, *buf);
+        }
+            
+        // 如果没有缓存，则取消selectWrite事件, 无论这次发送正常或者失败。
+        if ( !channel->peekOutputBuffer() ) {
+            m_selector.cancel(channel->fd(), selectWrite);
+        }
+    }
+
+    inline 
+    void SimpleSocketServer::ImplClass::onChannelEvent(Selector::Event * event)
+    {
+        SocketChannel * channel = (SocketChannel*)event->data();
+        auto itEntry = m_channelMap.find( channel->fd()) ;
+        assert( itEntry != m_channelMap.end());
+
+        if ( event->events() & selectWrite ) {
+            this->onChannelWritable(itEntry->second);
+        }
+        if ( event->events() & selectRead ) {  
+            this->onChannelReadable(itEntry->second);
+        }
+        if ( event->events() & selectError ) {
+            this->onChannelError(itEntry->second);
+        }
+    }
+
     inline 
     void SimpleSocketServer::ImplClass::onListenerEvent(Selector::Event * event)
     {
@@ -604,7 +659,7 @@ namespace nio
         // 这里必须把buffer放入队列，按顺序send，不能先尝试发送该缓存消息，
         // 不然当输出队列里还有发送缓存时，会造成消息错乱。
         ImplClass::ChannelEntry & entry = it->second;
-        entry.channel->pushOutputQueue(buffer);
+        entry.channel->pushOutputBuffer(buffer);
         bool isok = m_impl->m_selector.set(channel, selectWrite, e);
         return isok;
     } 
