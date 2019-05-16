@@ -24,7 +24,7 @@ public:
         : m_server(server) , m_sendTimeout(sendtimeout) {}
 
     void sendResponse(int fd, const char * data, size_t len);
-    bool operator()(int fd, int status, io::MutableBuffer & buffer);
+    void operator()(int fd, int status, io::MutableBuffer & buffer);
 };
 
 class SendCallback
@@ -93,16 +93,21 @@ void ListenerCallback::operator()(int sfd, int cfd, const net::Location * remote
     SYM_TRACE_VA("[info] accept new channel, fd: %d", cfd);
     err::Error error;
     m_server.acceptChannel(cfd, RecvCallback(m_server), SendCallback(m_server), CloseCallback(m_server), &error);
+    
+    // 开始接收消息
+    io::MutableBuffer buffer(new char[1024], 0, 1024);
+    buffer.limit(sizeof(srpc::srpc_message_header));
+    m_server.beginReceive(cfd, buffer);
 }
 
-bool RecvCallback::operator()(int fd, int status, io::MutableBuffer & buffer) 
+void RecvCallback::operator()(int fd, int status, io::MutableBuffer & buffer) 
 {
     if ( status != 0 ) {
         // 读消息失败，channel关闭
         SYM_TRACE_VA("[error] channel read error, fd: %d", fd);
         if ( buffer.data()) free(buffer.detach());
         m_server.shutdownChannel(fd, nio::SimpleSocketServer::shutdownRead);
-        return false;  // 回调后不再接收消息
+        // return false;  // 回调后不再接收消息, b不需要返回
     }
 
     // 一般首次读消息时，缓存还没分配，先分配缓存
@@ -111,7 +116,7 @@ bool RecvCallback::operator()(int fd, int status, io::MutableBuffer & buffer)
         buffer.attach(p, 1024);   // 缓存挂到buffer
         buffer.resize(0);         // 有效数据为0
         buffer.limit(sizeof(srpc::message_header_t));  // 先接收报文头
-        return true;   // 回调后自动继续接收
+        // return true;   // 回调后自动继续接收 不需要返回
     }
 
     // 后续缓存已经分配，就检查收到的数据
@@ -122,7 +127,7 @@ bool RecvCallback::operator()(int fd, int status, io::MutableBuffer & buffer)
         SYM_TRACE_VA("[error] channel message error, fd: %d", fd);
         free(buffer.detach());
         m_server.shutdownChannel(fd, nio::SimpleSocketServer::shutdownRead);
-        return false;
+        // return false;
     }
 
     // 检查收到的消息长度，是否接收完整。
@@ -138,7 +143,7 @@ bool RecvCallback::operator()(int fd, int status, io::MutableBuffer & buffer)
         
         buffer.reset();  // 缓存倒回, limit = cap, size = 0;
         buffer.limit(sizeof(srpc::message_header_t));
-        return true;  // 接续接收
+        // return true;  // 接续接收
     }
 
     // 消息长度和当前收到的不一致，通常是收到消息头，需要扩充内存，继续接收
@@ -155,7 +160,7 @@ bool RecvCallback::operator()(int fd, int status, io::MutableBuffer & buffer)
         }
 
         buffer.limit(msize);
-        return true; // 继续收包体
+        // return true; // 继续收包体
     } else {
         // 收到了一半消息体或消息头，一般不会有这种问题。
         assert("bad message length" == nullptr);

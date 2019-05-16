@@ -313,7 +313,7 @@ namespace nio
     public:
         typedef std::function<void (int sfd, int cfd, const net::Location * remote )> ListenerCallback;
         typedef std::function<void (int fd, int status, io::ConstBuffer & buffer)> SendCallback;
-        typedef std::function<bool (int fd, int status, io::MutableBuffer & buffer)> RecvCallback;
+        typedef std::function<void (int fd, int status, io::MutableBuffer & buffer)> RecvCallback;
         typedef std::function<void (int fd)>     CloseCallback; 
         typedef std::function<void (int status)> ServerCallback;
         typedef std::function<bool (int timer)>  TimerCallback;
@@ -337,6 +337,8 @@ namespace nio
         int   acceptChannel(int fd, const RecvCallback & rcb, const SendCallback & scb, const CloseCallback &ccb, err::Error * e = nullptr);
 
         int   addListener(const net::Location &loc, const ListenerCallback & callback, err::Error * e = nullptr);
+
+        bool  beginReceive(int channel, io::MutableBuffer & buffer);
 
         void  exitLoop();
 
@@ -383,12 +385,17 @@ namespace nio
 
         int  fd() const { return m_sock.fd(); }
         bool close(err::Error * e = nullptr);
+        int  receiveSome(err::Error * e = nullptr);
         bool shutdown(int how, err::Error *e = nullptr);
         int  shutdownFlags() const;
-        int  sendSome();
+        int  sendSome(err::Error * e = nullptr);
         int  pushOutputBuffer(const io::ConstBuffer & buf);
+        io::MutableBuffer * peekInputBuffer();
         io::ConstBuffer * peekOutputBuffer();
-        io::ConstBuffer * popOutputBuffer();
+        
+        void popInputBuffer();
+        void popOutputBuffer();
+        
     }; // end class SocketChannel
 
     class SocketListener : public IoBase {
@@ -447,6 +454,28 @@ namespace nio
 namespace nio
 {
     inline 
+    void SimpleSocketServer::ImplClass::onChannelReadable(ChannelEntry & entry)
+    {
+        SocketChannel * channel = entry.channel;
+        ssize_t recvSize = 0;
+
+        // 循环接收，直到没有数据可收
+        while ( ( recvSize = channel->receiveSome() ) > 0 ) {
+            io::MutableBuffer * buf = channel->peekInputBuffer();
+            if ( buf->size() == buf->limit() ) {
+                entry.recvCb(channel->fd(), statusOk, *buf);
+            }
+        } // end while
+
+        // 接收失败，回调
+        if ( recvSize < 0 )  {
+            entry.recvCb(channel->fd(), statusError, *channel->peekInputBuffer());
+            channel->popInputBuffer();
+            m_selector.cancel(channel->fd(), selectRead);
+        }
+    }
+
+    inline 
     void SimpleSocketServer::ImplClass::onChannelWritable(ChannelEntry & entry)
     {
         SocketChannel * channel = entry.channel;
@@ -456,7 +485,7 @@ namespace nio
 
         if ( n >= 0 ) {
             // 需要发送的数据发送完成, 执行回调，并将该缓存发送队列中取出
-            if ( buf->size() == buf->limit() ) {
+            if ( buf->position() == buf->limit() ) {
                 entry.sendCb(channel->fd(), statusOk, *buf);
                 channel->popOutputBuffer();
             }
@@ -554,7 +583,7 @@ namespace nio
         err::Error * e )
     {
         std::unique_ptr<SocketChannel> ptrChannel(new SocketChannel(fd));
-        bool isok = m_impl->m_selector.add(fd, selectRead, ptrChannel.get(), e);
+        bool isok = m_impl->m_selector.add(fd, selectNone, ptrChannel.get(), e);
         assert( isok );
 
         auto it = m_impl->m_channelMap.find(fd);
