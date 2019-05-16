@@ -50,7 +50,8 @@ namespace net {
 
     class Location {
     public:
-        Location(const char * host, int port, err::Error *e) { SYM_NOTIMPL("Location"); }
+        Location();
+        Location(const char * host, int port, err::Error *e);
     }; // end class Location
 
     class Socket{

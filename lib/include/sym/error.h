@@ -36,6 +36,9 @@ namespace err {
         Error() : m_code(0) {}
         Error(int code, const char * message) : m_code(code), m_message(message) {}
         ~Error() {}
+        void clear();
+
+        operator bool() const { return m_code != 0; }
     }; // end class Error
 
 } // end namespace sl

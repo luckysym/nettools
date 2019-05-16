@@ -282,7 +282,7 @@ namespace nio
         class Event
         {
         public:
-            int events() const;
+            int    events() const;
             void * data() const;
         };
     public:
@@ -321,6 +321,10 @@ namespace nio
             shutdownRead  = 1,
             shutdownWrite = 2,
             shutdownBoth  = shutdownRead + shutdownWrite
+        };
+
+        enum {
+            statusIdle     ///< 服务空闲状态
         };
 
     public:
@@ -368,9 +372,12 @@ namespace nio
     }; // end class IoBase
 
     class SocketChannel : public IoBase {
+    private:
+        net::Socket  m_sock;
     public:
-        SocketChannel(int fd);
+        SocketChannel(int fd) : IoBase(EnumIoType::ioSocketChannel), m_sock(fd) {}
         ~SocketChannel();
+
         bool close(err::Error * e = nullptr);
         bool shutdown(int how, err::Error *e = nullptr);
         int  shutdownFlags() const;
@@ -378,13 +385,14 @@ namespace nio
     }; // end class SocketChannel
 
     class SocketListener : public IoBase {
-    public:
+    private:
         net::Socket m_sock;
     public:
         SocketListener();
         ~SocketListener();
         int fd() const { return m_sock.fd(); }
         bool open(const net::Location & localAddr, err::Error * e);
+        int acceptFd(net::Location * remote, err::Error * e); 
     }; // end class SocketListener
 
     class SimpleSocketServer::ImplClass {
@@ -412,8 +420,8 @@ namespace nio
         ServerCallback m_serverCb;
 
     public:
-        ImplClass();
-        ~ImplClass();
+        ImplClass()   {}
+        ~ImplClass()  {}
 
         SocketChannel * getChannel(int fd);
 
@@ -423,6 +431,47 @@ namespace nio
     }; // end classs SimpleSocketServer::ImplClass
 
 } // end namespace nio
+
+namespace nio
+{
+    inline 
+    void SimpleSocketServer::ImplClass::onListenerEvent(Selector::Event * event)
+    {
+        SocketListener * listener = (SocketListener*)event->data();
+        auto itEntry = m_listenerMap.find(listener->fd());
+        assert ( itEntry != m_listenerMap.end());
+
+        if ( event->events() & selectRead ) {
+            int cfd;
+            net::Location remote;
+            err::Error error;
+
+            while ( cfd = listener->acceptFd(&remote, &error) ) {
+                if ( cfd >= 0 ) {
+                    itEntry->second.callback(listener->fd(), cfd, &remote);
+                } else if ( !error ) {
+                    break;  // 所有排队的连接都已获取
+                } else {
+                    // 获取连接失败, 执行异常回调，回调过程通常关闭该监听。
+                    itEntry->second.callback(listener->fd(), -1, nullptr);
+                    break;
+                }
+                error.clear();
+            }
+        } 
+        if ( event->events() & selectError ) {
+            itEntry->second.callback(listener->fd(), -1, nullptr);
+        } // end if 
+    } 
+
+    inline 
+    void SimpleSocketServer::ImplClass::onServerIdle()
+    {
+        if ( m_serverCb ) m_serverCb(statusIdle);
+    }
+
+} // end namespace nio
+
 
 namespace nio 
 {
