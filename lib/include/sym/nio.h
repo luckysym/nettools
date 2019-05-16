@@ -372,6 +372,8 @@ namespace nio
         SocketChannel(int fd);
         ~SocketChannel();
         bool close(err::Error * e = nullptr);
+        bool shutdown(int how, err::Error *e = nullptr);
+        int  shutdownFlags() const;
         int  pushOutputQueue(const io::ConstBuffer & buf);
     }; // end class SocketChannel
 
@@ -558,6 +560,25 @@ namespace nio
         return isok;
     } 
 
+    inline
+    bool SimpleSocketServer::shutdownChannel(int channel, int how, err::Error * e)
+    {
+        auto itChannelEntry = m_impl->m_channelMap.find(channel);
+        if ( itChannelEntry == m_impl->m_channelMap.end() ) {
+            if (  e ) *e = err::Error(-1, "unknown channel id");
+            return false;
+        }
 
+        bool isok = itChannelEntry->second.channel->shutdown(how, e);
+        if ( !isok ) return false;
+        
+        // 如果该channel的read和write都shutdown，则从selector中移除，
+        // 移除后的selector回调中，执行closeChannel以及CloseCallback。
+        if ( itChannelEntry->second.channel->shutdownFlags() == shutdownBoth ) {
+            m_impl->m_selector.remove(channel);
+        }
+
+        return true;
+    }
 
 } // end namespace nio
