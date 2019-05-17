@@ -28,12 +28,19 @@ namespace err {
     void trace_stderr(const char * file, int line, const char * format, ...);
 
     class Error { 
+    public:
+        /// error domain
+        enum {
+            system,
+            user
+        };
     private:
         int         m_code;
         std::string m_message;
 
     public:
         Error() : m_code(0) {}
+        Error(int code, int domain);
         Error(int code, const char * message) : m_code(code), m_message(message) {}
         ~Error() {}
         void clear();

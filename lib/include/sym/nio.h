@@ -17,136 +17,12 @@
 #include <functional>
 #include <memory>
 #include <queue>
+#include <unordered_map>
 
 /// 包含同步非阻塞IO相关操作的名称空间。
 namespace nio
 {
-    const int nio_status_success = 0;
-    const int nio_status_error   = 1;
-    const int nio_status_timeout = 2;
-
-    const int select_none     = 0;
-    const int select_read     = 1;
-    const int select_write    = 2;
-    const int select_timeout  = 4;
-    const int select_error    = 8;
-    const int select_add      = 16;
-    const int select_remove   = 32;
-    
-    const int init_list_size = 128;    ///< 列表初始化大小
-    
-    const int selopt_thread_safe = 1;  ///< selector support multi-thread
-
-    /// selector event callback function type
-    typedef void (*selector_event_proc)(int fd, int event, void *arg);
-
-    /// 事件超时设置节点
-    typedef struct select_expiration {
-        int       fd;
-        int       ops;
-        int64_t   exp;
-        int       inque;
-    }  sel_expire_t;
-    typedef alg::basic_dlink_node<sel_expire_t> sel_expire_node;
-
-    typedef struct select_item {
-        int    fd;
-        int    events;    ///< current requested epoll events
-        selector_event_proc  callback;
-        void   *arg;
-        sel_expire_node rd;
-        sel_expire_node wr; 
-    } sel_item_t;
-    typedef alg::basic_dlink_node<sel_item_t> sel_item_node;
-
-    typedef struct select_operation {
-        int     fd;
-        int     ops;      ///< requested operation events
-        int64_t expire;
-        selector_event_proc  callback;
-        void   *arg;
-        bool    async;    ///< is the operation asynchronous.
-    } sel_oper_t;
-    typedef alg::basic_dlink_node<sel_oper_t> sel_oper_node;
-
-    typedef alg::basic_array<epoll_event> epoll_event_array;
-    typedef alg::basic_array<sel_item_t>  sel_item_array;
-    typedef alg::basic_dlink_list<sel_oper_t> sel_oper_list;
-    typedef alg::basic_dlink_list<sel_expire_t> sel_expire_list;
-
-    typedef struct select_event {
-        int   fd;
-        int   event;
-        void *arg;
-        selector_event_proc callback;
-    } sel_event_t;
-    typedef void (*selector_dispatch_proc)(sel_event_t * event, void * disparg);
-
-    struct selector_epoll {
-        mt::mutex_t      *reqlock;   ///< lock for request operation list(requests) accessing
-        sel_oper_list     requests;  ///< request operation queue
-        sel_item_array    items;     ///< registered items
-        sel_expire_list   timeouts;  ///< timeout queue
-        int               def_wait;  ///< default wait timeout
-        int               count;     ///< total fd registered in epoll, event fd not involved
-        selector_dispatch_proc  disp;  ///< event dispatcher
-        void *            disparg;     ///< argument of disp proc
-
-        int               evfd;     ///< event fd for nofitier
-        int               epfd;     ///< epoll fd
-        epoll_event_array events;   ///< receive the output events from epoll_wait
-    };
-    typedef struct selector_epoll selector_t;
-
-    /// init and return the selector, returns null if failed
-    bool selector_init(selector_t *sel, int options, err::error_t *err);
-
-    /// init and return the selector, with custom event dispatcher
-    bool selector_init(selector_t *sel, int options, selector_dispatch_proc disp, void *disparg, err::error_t *err);
-
-    /// destroy the selector created by selector_create
-    bool selector_destroy(selector_t *sel, err::error_t *err);
-
-    /// add a socket fd and its callback function to the selector.
-    bool selector_add(selector_t * sel, int fd, selector_event_proc cb, void *arg, err::error_t *err);
-
-    // add a socket fd and its callback function to the selector async.
-    bool selector_add_async(selector_t * sel, int fd, selector_event_proc cb, void *arg);
-
-    /// remove socket from selector
-    bool selector_remove(selector_t * sel, int fd, err::error_t *err);
-
-    /// remove socket from selector 
-    bool selector_remove_async(selector_t * sel, int fd);
-
-    /// request events.
-    bool selector_request(selector_t * sel, int fd, int events, int64_t expire, err::error_t *err);
-
-    /// notify the selector waking up
-    bool selector_wakeup(selector_t * sel, err::error_t *err);
-
-    /// run the selector
-    int  selector_run(selector_t *sel, err::error_t *err);
-
-    namespace detail {
-
-        inline
-        void selector_sync_dispatcher(sel_event_t *event, void *disparg) {
-            event->callback(event->fd, event->event, event->arg);
-        }
-
-    } // end namespace detail
-
-    namespace epoll {
-
-        sel_item_t * selector_add_internal(selector_epoll * sel, sel_oper_t * oper, err::error_t *e);
-        bool selector_remove_internal(selector_epoll * sel, sel_oper_t *oper, err::error_t *e);
-        bool selector_request_internal(selector_epoll *sel, sel_oper_t *oper, err::error_t *e);
-        int  selector_run_internal(selector_epoll *sel, err::error_t *e);
-
-    } // end namespace detail
-
-    enum {
+     enum {
         selectNone     = 0,
         selectRead     = 1,
         selectWrite    = 2,
@@ -159,10 +35,27 @@ namespace nio
         class Event
         {
         public:
+            Event();
+            Event(int fd, int events, void *data);
+
             int    events() const;
+            void   events(int events);
             void * data() const;
+            void   data(void *dat);
         };
+        
+        using EventMap = std::unordered_map<int, Event>;
+        using EventVec = std::vector<Event>;
+        using EpollEventVec = std::vector<epoll_event>;
+    private:
+        int            m_epfd;
+        EventMap       m_events;
+        EventVec       m_revents;
+        EpollEventVec  m_epevents;
     public:
+        Selector();
+        ~Selector();
+
         bool add(int fd, int events, void * data, err::Error * e = nullptr);
         bool remove(int fd, err::Error * e = nullptr);
         bool set(int fd, int events, err::Error * e = nullptr);
@@ -346,6 +239,155 @@ namespace nio
     }; // end classs SimpleSocketServer::ImplClass
 
 } // end namespace nio
+
+namespace nio
+{
+    inline 
+    Selector::Selector() : m_epfd(-1)
+    {
+        m_epfd = epoll_create1(EPOLL_CLOEXEC);
+        assert(m_epfd >= 0);
+    }
+
+    inline 
+    Selector::~Selector() {
+        if ( m_epfd >= 0 ) ::close(m_epfd);
+    }
+
+    inline 
+    bool Selector::add(int fd, int events, void *data, err::Error * e)
+    {
+        struct epoll_event evt;
+        evt.data.fd = fd;
+        evt.events = 0;
+        if ( events & selectRead  ) evt.events |= EPOLLIN;
+        if ( events & selectWrite ) evt.events |= EPOLLOUT;
+
+        int rv = ::epoll_ctl(m_epfd, EPOLL_CTL_ADD, fd, &evt);
+        if ( rv == -1 ) {
+            if ( e ) *e = err::Error(errno, err::Error::system);
+            return false;
+        }
+        
+        // 放入map
+        Event event(fd, events, data);
+        auto r = m_events.insert(std::make_pair(fd, event));
+        assert( r.second );
+
+        // epoll event列表+1
+        if ( m_epevents.size() == m_epevents.capacity() ) {
+            m_epevents.reserve(m_epevents.size() + 1024);
+        }
+        m_epevents.resize( m_epevents.size() + 1);
+
+        // revents列表递增
+        if ( m_revents.size() == m_revents.capacity() ) {
+            m_revents.reserve(m_revents.size() + 1024);
+        }
+        m_revents.resize( m_revents.size() + 1);
+
+        return true;
+    }
+
+    inline 
+    bool Selector::remove(int fd, err::Error * e)
+    {
+        m_events.erase(fd);
+        int rv = epoll_ctl(m_epfd, EPOLL_CTL_DEL, fd, nullptr);
+        if ( rv != 0 ) {
+            if ( e ) *e = err::Error(errno, err::Error::system);            
+            return false;
+        }
+
+        // revents数组递减
+        m_revents.resize(m_revents.size() - 1);
+        m_epevents.resize(m_epevents.size() - 1);
+        return true;
+    }
+
+    inline 
+    bool Selector::set(int fd, int events, err::Error * e) 
+    {
+        auto it = m_events.find(fd);
+        assert( it != m_events.end());
+
+        Event & event = it->second;
+        
+        int epevents = event.events() | events;
+
+        struct epoll_event evt;
+        evt.data.fd = fd;
+        evt.events  = 0;
+        if ( epevents & selectRead ) evt.events |= EPOLLIN;
+        if ( epevents & selectWrite ) evt.events |= EPOLLOUT;
+
+        int rv = epoll_ctl(m_epfd, EPOLL_CTL_MOD, fd, &evt);
+        if ( rv == -1 )  {
+            if ( e ) *e = err::Error(errno, err::Error::system);            
+            return false;
+        }
+
+        event.events( epevents );
+        return true;
+    }
+
+    inline 
+    bool Selector::cancel(int fd, int events, err::Error * e) 
+    {
+        auto it = m_events.find(fd);
+        assert( it != m_events.end());
+
+        Event & event = it->second;
+        
+        int epevents = event.events() &  (~events);
+
+        struct epoll_event evt;
+        evt.data.fd = fd;
+        evt.events  = 0;
+        if ( epevents & selectRead ) evt.events |= EPOLLIN;
+        if ( epevents & selectWrite ) evt.events |= EPOLLOUT;
+
+        int rv = epoll_ctl(m_epfd, EPOLL_CTL_MOD, fd, &evt);
+        if ( rv == -1 )  {
+            if ( e ) *e = err::Error(errno, err::Error::system);            
+            return false;
+        }
+
+        event.events( epevents );
+        return true;
+    }
+
+    inline 
+    int Selector::wait(int ms, err::Error * e)
+    {
+        int rv = epoll_wait(m_epfd, &m_epevents[0], m_epevents.size(), ms);
+        if ( rv > 0 ) {
+            for ( int i = 0;  i < rv; ++i ) {
+                struct epoll_event & epevt = m_epevents[i];
+                int fd = epevt.data.fd;
+                int events = 0;
+                if ( epevt.events & EPOLLIN ) events |= selectRead;
+                if ( epevt.events & EPOLLOUT) events |= selectWrite;
+                if ( epevt.events & EPOLLERR) events |= selectError;
+
+                Event & event = m_events[fd];
+                m_revents[i] = Event(fd, events, event.data());
+            }
+            return rv;
+        } else if ( rv < 0) {
+            if ( e ) *e = err::Error(errno, err::Error::system);
+        }
+
+        return rv;
+    }
+
+    inline 
+    Selector::Event * Selector::revents(int i) {
+        return &m_revents[i];
+    }
+
+} // end namespace nio
+
 
 namespace nio
 {
