@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <errno.h>
 #include <string>
 
 /// 包含异常错误以及过程跟踪相关数据结构和操作的名称空间。
@@ -27,28 +28,55 @@ namespace err {
 
     void trace_stderr(const char * file, int line, const char * format, ...);
 
+    /// 错误信息封装类
     class Error { 
     public:
         /// error domain
         enum {
-            system,
-            user
+            dmNone,
+            dmSystem
         };
     private:
         int         m_code;
+        int         m_domain;
         std::string m_message;
 
     public:
-        Error() : m_code(0) {}
+        Error() : m_code(0), m_domain(dmNone) {}
         Error(int code, int domain);
-        Error(int code, const char * message) : m_code(code), m_message(message) {}
-        ~Error() {}
+        Error(int code, const char * message);
+        ~Error() { this->clear(); }
         void clear();
+
+        int code () const { return m_code; }
+        const char * message() const { return m_message.c_str(); }
 
         operator bool() const { return m_code != 0; }
     }; // end class Error
 
-} // end namespace sl
+} // end namespace err
+
+namespace err
+{
+    inline 
+    Error::Error(int code, int domain ) : m_code(code ) , m_domain(domain)
+    {
+        if ( domain == Error::dmSystem ) {
+            m_message.assign(strerror(code));
+        }
+        m_domain = domain;
+    }
+
+    inline
+    Error::Error( int code, const char * msg) 
+        : m_code( code ), m_domain(Error::dmNone), m_message (msg?msg:"") 
+    { }
+
+    inline 
+    void Error::clear() { m_code = 0; m_domain = dmNone; m_message.clear(); }
+
+    
+} // end namespace err
 
 /// \def SYM_TRACE(msg)
 /// 用于输出过程跟踪信息。

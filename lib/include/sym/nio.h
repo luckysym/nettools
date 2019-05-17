@@ -270,7 +270,7 @@ namespace nio
 
         int rv = ::epoll_ctl(m_epfd, EPOLL_CTL_ADD, fd, &evt);
         if ( rv == -1 ) {
-            if ( e ) *e = err::Error(errno, err::Error::system);
+            if ( e ) *e = err::Error(errno, err::Error::dmSystem);
             return false;
         }
         
@@ -300,7 +300,7 @@ namespace nio
         m_events.erase(fd);
         int rv = epoll_ctl(m_epfd, EPOLL_CTL_DEL, fd, nullptr);
         if ( rv != 0 ) {
-            if ( e ) *e = err::Error(errno, err::Error::system);            
+            if ( e ) *e = err::Error(errno, err::Error::dmSystem);            
             return false;
         }
 
@@ -328,7 +328,7 @@ namespace nio
 
         int rv = epoll_ctl(m_epfd, EPOLL_CTL_MOD, fd, &evt);
         if ( rv == -1 )  {
-            if ( e ) *e = err::Error(errno, err::Error::system);            
+            if ( e ) *e = err::Error(errno, err::Error::dmSystem);            
             return false;
         }
 
@@ -354,7 +354,7 @@ namespace nio
 
         int rv = epoll_ctl(m_epfd, EPOLL_CTL_MOD, fd, &evt);
         if ( rv == -1 )  {
-            if ( e ) *e = err::Error(errno, err::Error::system);            
+            if ( e ) *e = err::Error(errno, err::Error::dmSystem);            
             return false;
         }
 
@@ -380,7 +380,7 @@ namespace nio
             }
             return rv;
         } else if ( rv < 0) {
-            if ( e ) *e = err::Error(errno, err::Error::system);
+            if ( e ) *e = err::Error(errno, err::Error::dmSystem);
         }
 
         return rv;
