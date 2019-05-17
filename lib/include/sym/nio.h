@@ -595,6 +595,13 @@ namespace nio
         if ( m_serverCb ) m_serverCb(statusIdle);
     }
 
+    inline 
+    SocketChannel * SimpleSocketServer::ImplClass::getChannel(int fd)
+    {
+        auto it = m_channelMap.find(fd);
+        if ( it == m_channelMap.end() ) return nullptr;
+        else return it->second.channel;
+    }
 } // end namespace nio
 
 
