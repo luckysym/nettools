@@ -16,6 +16,7 @@
 
 #include <functional>
 #include <memory>
+#include <queue>
 
 /// 包含同步非阻塞IO相关操作的名称空间。
 namespace nio
@@ -327,6 +328,7 @@ namespace nio
         enum {
             statusOk     =  0,     ///< 正常状态
             statusError  = -1,     ///< 错误状态
+            statusCancel = -2,     ///< 取消状态，如因连接关闭，队列里的读写操作都会cancel
             statusIdle   =  0      ///< 服务空闲状态，与statusOk相同
         };
 
@@ -425,6 +427,8 @@ namespace nio
         using ChannelMap  = std::unordered_map<int, ChannelEntry>;
         using ListenerMap = std::unordered_map<int, ListenerEntry>;
 
+        using Request = std::function<void ()>;
+
     public:
         Selector       m_selector;
         ListenerMap    m_listenerMap;
@@ -432,6 +436,7 @@ namespace nio
         int            m_idleInterval {-1};
         int            m_exitloop { false };
         ServerCallback m_serverCb;
+        std::queue<Request> m_requestQueue;
 
     public:
         ImplClass()   {}
@@ -443,6 +448,16 @@ namespace nio
         void onChannelEvent(Selector::Event * event);
         void onServerIdle();
 
+        bool pushShutdownRequest(int channel, int how);
+        bool pushChannelCloseRequest(int channel);
+
+        bool hasRequest() const { return !m_requestQueue.empty(); }
+        Request popRequest()  { 
+            Request r = m_requestQueue.front(); 
+            m_requestQueue.pop();
+            return r;
+        }
+
     private:
         void onChannelWritable(ChannelEntry & entry);
         void onChannelReadable(ChannelEntry & entry);
@@ -453,6 +468,60 @@ namespace nio
 
 namespace nio
 {
+    inline 
+    bool SimpleSocketServer::ImplClass::pushChannelCloseRequest(int channel)
+    {
+        auto request = [this, channel]() {
+            auto itEntry = this->m_channelMap.find(channel);
+            assert(itEntry != this->m_channelMap.end());
+            auto & entry = itEntry->second;
+            entry.closeCb(channel);
+            this->m_channelMap.erase(channel);
+        };
+    }
+
+    inline 
+    bool SimpleSocketServer::ImplClass::pushShutdownRequest(int channel, int how)
+    {
+        auto request = [this, channel, how]() {
+            auto itEntry = this->m_channelMap.find(channel);
+            assert(itEntry != this->m_channelMap.end());
+            auto & entry = itEntry->second;
+            if ( how & shutdownWrite ) {
+                io::ConstBuffer * buf;
+                while ( buf = entry.channel->peekOutputBuffer() ) {
+                    entry.sendCb(channel, statusCancel, *buf);
+                    entry.channel->popOutputBuffer();
+                }
+            }
+            if ( how & shutdownRead ) {
+                io::MutableBuffer * buf;
+                while ( buf = entry.channel->peekInputBuffer() ) {
+                    entry.recvCb(channel, statusCancel, *buf);
+                    entry.channel->popInputBuffer();
+                }
+            }
+        };
+    }
+
+    inline 
+    void SimpleSocketServer::ImplClass::onChannelError(ChannelEntry & entry)
+    {
+        // channel事件监听发生异常，视作读写全部失败，所有读写操作都将执行异常回调。
+        int fd = entry.channel->fd();
+        io::ConstBuffer * ob ;
+        while ( ob = entry.channel->peekOutputBuffer() ) {
+            entry.sendCb(fd, statusError, *ob);
+            entry.channel->popOutputBuffer();
+        }
+
+        io::MutableBuffer * ib;
+        while ( ib = entry.channel->peekInputBuffer() ) {
+            entry.recvCb(fd, statusError, *ib);
+            entry.channel->popInputBuffer();
+        }
+    }
+
     inline 
     void SimpleSocketServer::ImplClass::onChannelReadable(ChannelEntry & entry)
     {
@@ -598,9 +667,7 @@ namespace nio
     {
         std::unique_ptr<SocketListener> ptrListener(new SocketListener());
         bool isok = ptrListener->open(localAddr, e);
-        if ( !isok ) {
-            return false;
-        }
+        if ( !isok ) return false;
 
         // 监听成功, 注册到Selector，然后放入表中，最后返回监听器描述字表示当前监听器的ID。
         //
@@ -620,10 +687,13 @@ namespace nio
     bool SimpleSocketServer::closeChannel(int fd, err::Error * e) 
     {
         SocketChannel * channel = m_impl->getChannel(fd);
-        assert(channel);
+        if ( channel == nullptr ) return true;  // already closed
+
         m_impl->m_selector.remove( fd, e);   // remove fd from selector synchronized
-        channel->close();     // close the channel and then release it
-        delete channel;
+        channel->close(e);
+        
+        m_impl->pushShutdownRequest(fd, shutdownBoth);
+        m_impl->pushChannelCloseRequest(fd);
         return true;
     }
 
@@ -649,6 +719,12 @@ namespace nio
     {
         m_impl->m_exitloop = false;
         while ( !m_impl->m_exitloop ) {
+            // 执行异步请求
+            while ( m_impl->hasRequest() ) {
+                auto request = m_impl->popRequest();
+                request();
+            }
+
             int r = m_impl->m_selector.wait(m_impl->m_idleInterval, e);
             if ( r > 0 ) {
                 for ( int i = 0; i < r; ++i ) {
@@ -689,9 +765,10 @@ namespace nio
         // 不然当输出队列里还有发送缓存时，会造成消息错乱。
         ImplClass::ChannelEntry & entry = it->second;
         entry.channel->pushOutputBuffer(buffer);
+
         bool isok = m_impl->m_selector.set(channel, selectWrite, e);
         return isok;
-    } 
+    }
 
     inline
     bool SimpleSocketServer::shutdownChannel(int channel, int how, err::Error * e)
@@ -705,13 +782,7 @@ namespace nio
         bool isok = itChannelEntry->second.channel->shutdown(how, e);
         if ( !isok ) return false;
         
-        // 如果该channel的read和write都shutdown，则从selector中移除，
-        // 移除后的selector回调中，执行closeChannel以及CloseCallback。
-        if ( itChannelEntry->second.channel->shutdownFlags() == shutdownBoth ) {
-            m_impl->m_selector.remove(channel);
-        }
-
-        return true;
+        return m_impl->pushShutdownRequest(channel, how);  // 发送停用请求
     }
 
 } // end namespace nio
