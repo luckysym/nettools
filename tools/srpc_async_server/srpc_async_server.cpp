@@ -10,7 +10,7 @@ private:
     nio::SimpleSocketServer & m_server;
 public:
     ListenerCallback(nio::SimpleSocketServer & server) : m_server(server) {}
-    void operator()(int sfd, int cfd, const net::Location * remote);
+    void operator()(int sfd, int cfd, const net::Address * remote);
 };
 
 class RecvCallback
@@ -72,7 +72,7 @@ int main(int argc, char **argv)
 
     server.setServerCallback(ServerCallback());
     server.setIdleInterval(10);    // 10s空闲回调。
-    net::Location loc("0.0.0.0", 8899, &e);
+    net::Address loc("0.0.0.0", 8899, &e);
 
     int listenerId = server.addListener(loc, ListenerCallback(server), &e);
 
@@ -82,7 +82,7 @@ int main(int argc, char **argv)
     return 0;
 }
 
-void ListenerCallback::operator()(int sfd, int cfd, const net::Location * remote)
+void ListenerCallback::operator()(int sfd, int cfd, const net::Address * remote)
 {
     if ( cfd == -1 )  {
         SYM_TRACE_VA("[error] listener error, fd: %d", sfd);

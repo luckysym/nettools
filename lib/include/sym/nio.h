@@ -312,7 +312,7 @@ namespace nio
         ImplClass * m_impl;
 
     public:
-        typedef std::function<void (int sfd, int cfd, const net::Location * remote )> ListenerCallback;
+        typedef std::function<void (int sfd, int cfd, const net::Address * remote )> ListenerCallback;
         typedef std::function<void (int fd, int status, io::ConstBuffer & buffer)> SendCallback;
         typedef std::function<void (int fd, int status, io::MutableBuffer & buffer)> RecvCallback;
         typedef std::function<void (int fd)>     CloseCallback; 
@@ -338,7 +338,7 @@ namespace nio
 
         int   acceptChannel(int fd, const RecvCallback & rcb, const SendCallback & scb, const CloseCallback &ccb, err::Error * e = nullptr);
 
-        int   addListener(const net::Location &loc, const ListenerCallback & callback, err::Error * e = nullptr);
+        int   addListener(const net::Address &loc, const ListenerCallback & callback, err::Error * e = nullptr);
 
         bool  beginReceive(int channel, io::MutableBuffer & buffer);
 
@@ -404,11 +404,11 @@ namespace nio
     private:
         net::Socket m_sock;
     public:
-        SocketListener();
-        ~SocketListener();
+        SocketListener() : IoBase( EnumIoType::ioSocketListener ) {}
+        ~SocketListener() { if ( m_sock.fd() >= 0 ) m_sock.close();}
         int fd() const { return m_sock.fd(); }
-        bool open(const net::Location & localAddr, err::Error * e);
-        int acceptFd(net::Location * remote, err::Error * e); 
+        bool open(const net::Address & localAddr, err::Error * e= nullptr);
+        int acceptFd(net::Address * remote, err::Error * e); 
     }; // end class SocketListener
 
     class SimpleSocketServer::ImplClass {
@@ -468,6 +468,29 @@ namespace nio
 
 namespace nio
 {
+    inline 
+    bool SocketListener::open(const net::Address & localAddr, err::Error * e)
+    {
+        bool isok;
+        isok = m_sock.create(localAddr.af(), SOCK_STREAM, e);
+        if ( !isok ) return false;
+
+        isok = m_sock.bind(localAddr, e);
+        if ( !isok ) {
+            m_sock.close();
+            return false;
+        }
+
+        isok = m_sock.listen(e);
+        if ( !isok ) {
+            m_sock.close();
+            return false;
+        }
+
+        return true;
+    }
+    
+
     inline 
     bool SimpleSocketServer::ImplClass::pushChannelCloseRequest(int channel)
     {
@@ -596,7 +619,7 @@ namespace nio
 
         if ( event->events() & selectRead ) {
             int cfd;
-            net::Location remote;
+            net::Address remote;
             err::Error error;
 
             while ( cfd = listener->acceptFd(&remote, &error) ) {
@@ -663,7 +686,7 @@ namespace nio
     }
 
     inline 
-    int SimpleSocketServer::addListener(const net::Location & localAddr, const ListenerCallback & cb, err::Error * e)
+    int SimpleSocketServer::addListener(const net::Address & localAddr, const ListenerCallback & cb, err::Error * e)
     {
         std::unique_ptr<SocketListener> ptrListener(new SocketListener());
         bool isok = ptrListener->open(localAddr, e);

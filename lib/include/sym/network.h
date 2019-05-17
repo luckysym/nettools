@@ -48,11 +48,13 @@ namespace net {
         char * path;
     } location_t;
 
-    class Location {
+    class Address {
     public:
-        Location();
-        Location(const char * host, int port, err::Error *e);
-    }; // end class Location
+        Address();
+        Address(const char * host, int port, err::Error *e);
+        
+        int af() const;
+    }; // end class Address
 
     class Socket{
     private:
@@ -60,6 +62,10 @@ namespace net {
     public:
         Socket() {}
         Socket(int fd) : m_fd(fd) {}
+        bool close(err::Error *e = nullptr);
+        bool create(int af, int type, err::Error *e = nullptr);
+        bool bind(const Address & addr, err::Error * e = nullptr);
+        bool listen(err::Error * e = nullptr);
         int fd() const  { return m_fd; }
     }; // end class Socket
 
