@@ -270,14 +270,14 @@ namespace nio
         int  shutdownFlags() const { return m_shutFlags; }
         int  sendSome(err::Error * e = nullptr);
         
-        void  pushInputBuffer(const io::MutableBuffer & buf);
-        void  pushOutputBuffer(const io::ConstBuffer & buf);
+        void  pushInputBuffer(const io::MutableBuffer & buf) { m_inputBuffers.push(buf); }
+        void  pushOutputBuffer(const io::ConstBuffer & buf)  { m_outputBuffers.push(buf); }
 
-        io::MutableBuffer * peekInputBuffer();
-        io::ConstBuffer * peekOutputBuffer();
+        io::MutableBuffer * peekInputBuffer() { return m_inputBuffers.empty()?nullptr:&m_inputBuffers.front(); }
+        io::ConstBuffer * peekOutputBuffer()  { return m_outputBuffers.empty()?nullptr:&m_outputBuffers.front(); }
         
-        void popInputBuffer();
-        void popOutputBuffer();
+        void popInputBuffer() { if ( !m_inputBuffers.empty()) m_inputBuffers.pop(); }
+        void popOutputBuffer() { if ( !m_outputBuffers.empty()) m_outputBuffers.pop(); }
         
     }; // end class SocketChannel
 
