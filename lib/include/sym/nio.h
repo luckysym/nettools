@@ -34,14 +34,19 @@ namespace nio
     public:
         class Event
         {
+        private:
+            int    m_fd      { -1 };
+            int    m_sevents { selectNone };
+            void * m_data    { nullptr };
         public:
-            Event();
-            Event(int fd, int events, void *data);
+            Event() {}
+            Event(int fd, int sevents, void *data)
+                : m_fd(fd), m_sevents(sevents), m_data(data) {}
 
-            int    events() const;
-            void   events(int events);
-            void * data() const;
-            void   data(void *dat);
+            int    sevents() const {  return m_sevents; }
+            void   sevents(int sevents) { m_sevents = sevents; }
+            void * data() const   { return m_data; }
+            void   data(void *dat) { m_data = dat; }
         };
         
         using EventMap = std::unordered_map<int, Event>;
@@ -313,13 +318,13 @@ namespace nio
 
         Event & event = it->second;
         
-        int epevents = event.events() | events;
+        int sevents = event.sevents() | events;
 
         struct epoll_event evt;
         evt.data.fd = fd;
         evt.events  = 0;
-        if ( epevents & selectRead ) evt.events |= EPOLLIN;
-        if ( epevents & selectWrite ) evt.events |= EPOLLOUT;
+        if ( sevents & selectRead ) evt.events |= EPOLLIN;
+        if ( sevents & selectWrite ) evt.events |= EPOLLOUT;
 
         int rv = epoll_ctl(m_epfd, EPOLL_CTL_MOD, fd, &evt);
         if ( rv == -1 )  {
@@ -327,7 +332,7 @@ namespace nio
             return false;
         }
 
-        event.events( epevents );
+        event.sevents( sevents );
         return true;
     }
 
@@ -339,13 +344,13 @@ namespace nio
 
         Event & event = it->second;
         
-        int epevents = event.events() &  (~events);
+        int sevents = event.sevents() &  (~events);
 
         struct epoll_event evt;
         evt.data.fd = fd;
         evt.events  = 0;
-        if ( epevents & selectRead ) evt.events |= EPOLLIN;
-        if ( epevents & selectWrite ) evt.events |= EPOLLOUT;
+        if ( sevents & selectRead ) evt.events |= EPOLLIN;
+        if ( sevents & selectWrite ) evt.events |= EPOLLOUT;
 
         int rv = epoll_ctl(m_epfd, EPOLL_CTL_MOD, fd, &evt);
         if ( rv == -1 )  {
@@ -353,7 +358,7 @@ namespace nio
             return false;
         }
 
-        event.events( epevents );
+        event.sevents( sevents );
         return true;
     }
 
@@ -590,13 +595,13 @@ namespace nio
         auto itEntry = m_channelMap.find( channel->fd()) ;
         assert( itEntry != m_channelMap.end());
 
-        if ( event->events() & selectWrite ) {
+        if ( event->sevents() & selectWrite ) {
             this->onChannelWritable(itEntry->second);
         }
-        if ( event->events() & selectRead ) {  
+        if ( event->sevents() & selectRead ) {  
             this->onChannelReadable(itEntry->second);
         }
-        if ( event->events() & selectError ) {
+        if ( event->sevents() & selectError ) {
             this->onChannelError(itEntry->second);
         }
     }
@@ -608,7 +613,7 @@ namespace nio
         auto itEntry = m_listenerMap.find(listener->fd());
         assert ( itEntry != m_listenerMap.end());
 
-        if ( event->events() & selectRead ) {
+        if ( event->sevents() & selectRead ) {
             int cfd;
             net::Address remote;
             err::Error error;
@@ -626,7 +631,7 @@ namespace nio
                 error.clear();
             }
         } 
-        if ( event->events() & selectError ) {
+        if ( event->sevents() & selectError ) {
             itEntry->second.callback(listener->fd(), -1, nullptr);
         } // end if 
     } 
