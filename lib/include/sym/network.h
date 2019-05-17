@@ -62,6 +62,7 @@ namespace net {
     public:
         Socket() {}
         Socket(int fd) : m_fd(fd) {}
+        int  accept(Address * remote, err::Error * e = nullptr);
         bool close(err::Error *e = nullptr);
         bool create(int af, int type, err::Error *e = nullptr);
         bool bind(const Address & addr, err::Error * e = nullptr);

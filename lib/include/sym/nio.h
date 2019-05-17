@@ -146,132 +146,6 @@ namespace nio
 
     } // end namespace detail
 
-    const int channel_state_closed  = 0;    ///< nio channel state closed
-    const int channel_state_open    = 1;    ///< nio channel state open
-    const int channel_state_opening = 2;    ///< nio channel state opening
-    const int channel_state_closing = 3;    ///< nio channel state closing
-
-    const int channel_event_received  = 1;
-    const int channel_event_sent      = 2;
-    const int channel_event_connected = 4;
-    const int channel_event_accepted  = 8;
-    const int channel_event_closed    = 16;
-    const int channel_event_error     = 128;
-
-    const int channel_shut_read  = net::sock_shut_read;
-    const int channel_shut_write = net::sock_shut_write;
-    const int channel_shut_both  = net::sock_shut_both;
-
-    const int nio_flag_exact_size = 1;    ///< exact size for receiving or sending
-
-    typedef struct nio_channel channel_t; ///< nio channel  type
-
-    /// nio channel io event calllback function type
-    typedef void (*channel_io_proc)(channel_t * ch, int event, void *io, void *arg);
-
-    typedef void (*channel_read_callback)(channel_t * ch, int status, io::buffer_t * buf, void *arg);
-
-    namespace detail {
-        // nio buffer 结构
-        typedef struct nio_operation {
-            io::buffer_t buf;
-            int          flags;
-            int64_t      exp;
-            union {
-                channel_read_callback rdcb;
-            } cb;
-            void *       cbarg;
-        } nio_oper_t;
-
-        // nio buffer 链表节点类型
-        typedef alg::basic_dlink_node<nio_oper_t> nio_oper_node_t;
-
-        // nio buffer 队列类型
-        typedef alg::basic_dlink_list<nio_oper_t> nio_oper_queue_t;
-
-        // channel event callback registered into selector
-        void channel_event_callback(int fd, int events, void *arg);
-    }; // end namespace detail
-
-    /// nio channel结构。
-    struct nio_channel {
-        int                 fd;      ///< channel文件描述字。
-        int                 state;   ///< 当前channel状态，取值channel_state_*。
-        selector_t *        sel;     ///< 当前channel关联的事件选择器。
-        channel_io_proc     iocb;    ///< io回调函数。
-        void *              arg;     ///< 在iocb调用时输出的用户自定义参数，在channel_init时指定。
-        detail::nio_oper_queue_t    wrops;  ///< 发送缓存队列。
-        detail::nio_oper_queue_t    rdops;  ///< 接收缓存队列。
-    };
-
-    /// init the channel.
-    bool channel_init(channel_t * ch, nio::selector_t *sel, channel_io_proc cb, void *arg, err::error_t *e);
-
-    /// create and init a new channel, return the created new channel.
-    channel_t * channel_new(nio::selector_t *sel, channel_io_proc cb, void *arg, err::error_t *e);
-
-    /// delete the channel create and returned by channel_new.
-    void channel_delete(channel_t *ch);
-
-    /// shutdown the channel, how is channel_shut_*.
-    bool channel_shutdown(channel_t *ch, int how, err::error_t *e);
-    
-    /// open a channel asynchronously.
-    bool channel_open_async(channel_t *ch, net::location_t * remote, err::error_t * err);
-
-    /// close the channel synchronously.
-    bool channel_close(channel_t *ch, err::error_t *e);
-
-    /// close the channel asynchronously.
-    bool channel_close_async(channel_t *ch, err::error_t *e);
-
-    /// send data asynchronously with exact size.
-    bool channel_sendn_async(channel_t *ch, const char * buf, int len, int64_t exp, err::error_t * err);
-
-    /// receive any data asynchronously.
-    bool channel_recvsome_async(channel_t *ch, char * buf, int len, int64_t exp, err::error_t * err);
-
-    /// receive data with exact size asynchronously.
-    bool channel_recvn_async(
-        channel_t *ch, io::buffer_t *buf, int64_t exp, channel_read_callback cb, void *cbarg, err::error_t *e);
-
-
-    const int listener_state_closed  = 0;    ///< nio channel state closed
-    const int listener_state_open    = 2;    ///< nio channel state open
-    
-    const int listener_event_accepted = 1;
-    const int listener_event_error    = 2;
-
-    typedef struct nio_listener listener_t;
-    typedef alg::basic_dlink_node<channel_t *> channel_ptr_node_t;
-    typedef alg::basic_dlink_list<channel_t *> channel_ptr_list_t;
-    
-    typedef struct nio_listener_io_param
-    {
-        channel_t *             channel;
-        const net::location_t * remote;
-    } listen_io_param_t;
-    typedef void (*listener_io_proc)(listener_t *lis, int event, const listen_io_param_t *io, void *arg);
-
-    struct nio_listener {
-        int                fd;
-        int                state;
-        selector_t  *      sel;
-        listener_io_proc   iocb;
-        void *             arg;
-        channel_ptr_list_t chops;
-    };
-
-    bool listener_init(listener_t * lis, selector_t * sel, listener_io_proc cb, void *arg);
-    bool listener_open(listener_t * lis, net::location_t * local, err::error_t *e);
-    bool listener_close(listener_t * lis, err::error_t *e);
-    bool listener_accept_async(listener_t * lis, channel_t * ch, err::error_t *e);
-
-    namespace detail {
-        void listener_event_callback(int sfd, int events, void *arg);
-    }
-
-
     const int selectNone     = 0;
     const int selectRead     = 1;
     const int selectWrite    = 2;
@@ -489,8 +363,13 @@ namespace nio
 
         return true;
     }
-    
 
+    inline
+    int SocketListener::acceptFd(net::Address * remote, err::Error * e)
+    {
+        return m_sock.accept(remote, e);
+    }
+    
     inline 
     bool SimpleSocketServer::ImplClass::pushChannelCloseRequest(int channel)
     {
