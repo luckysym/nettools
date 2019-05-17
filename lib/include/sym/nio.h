@@ -146,11 +146,13 @@ namespace nio
 
     } // end namespace detail
 
-    const int selectNone     = 0;
-    const int selectRead     = 1;
-    const int selectWrite    = 2;
-    const int selectTimeout  = 4;
-    const int selectError    = 8;
+    enum {
+        selectNone     = 0,
+        selectRead     = 1,
+        selectWrite    = 2,
+        selectTimeout  = 4,
+        selectError    = 8
+    };
 
     class Selector {
     public:
@@ -193,11 +195,7 @@ namespace nio
         typedef std::function<void (int status)> ServerCallback;
         typedef std::function<bool (int timer)>  TimerCallback;
 
-        enum {
-            shutdownRead  = 1,
-            shutdownWrite = 2,
-            shutdownBoth  = shutdownRead + shutdownWrite
-        };
+        
 
         enum {
             statusOk     =  0,     ///< 正常状态
@@ -253,17 +251,23 @@ namespace nio
     }; // end class IoBase
 
     class SocketChannel : public IoBase {
+        using InputBufferQueue = std::queue<io::MutableBuffer> ;
+        using OutputBufferQueue = std::queue<io::ConstBuffer> ;
     private:
         net::Socket  m_sock;
+        int          m_shutFlags  { 0 };
+        InputBufferQueue  m_inputBuffers;
+        OutputBufferQueue m_outputBuffers;
+
     public:
         SocketChannel(int fd) : IoBase(EnumIoType::ioSocketChannel), m_sock(fd) {}
-        ~SocketChannel();
+        ~SocketChannel() { if (m_sock.fd() >= 0) m_sock.close(); }
 
         int  fd() const { return m_sock.fd(); }
         bool close(err::Error * e = nullptr);
         int  receiveSome(err::Error * e = nullptr);
         bool shutdown(int how, err::Error *e = nullptr);
-        int  shutdownFlags() const;
+        int  shutdownFlags() const { return m_shutFlags; }
         int  sendSome(err::Error * e = nullptr);
         int  pushOutputBuffer(const io::ConstBuffer & buf);
         io::MutableBuffer * peekInputBuffer();
@@ -342,6 +346,69 @@ namespace nio
 
 namespace nio
 {
+    inline
+    int SocketChannel::sendSome(err::Error *e)
+    {
+        if ( m_outputBuffers.empty()) return 0;  // 没有可发数据
+        auto & buffer = m_outputBuffers.front();
+        int remain = buffer.size() - buffer.position();
+        int total = 0;
+
+        while ( remain > 0 ) {
+            int n = m_sock.send(buffer.data() + buffer.position(), remain, e);
+            if ( n > 0 ) {
+                buffer.position( buffer.position() + n );
+                remain = buffer.size() - buffer.position();
+                total += n;
+                continue;
+            } else if ( n == 0 ) {
+                break;    // 没有发出，输出缓存已满
+            } else {
+                return -1;
+            }
+        }
+        return (int)total;
+    }
+
+    inline 
+    int SocketChannel::receiveSome(err::Error * e)
+    {
+        if ( m_inputBuffers.empty() ) return 0;
+        auto & buffer = m_inputBuffers.front();
+        int remain = buffer.limit() - buffer.size();
+        int total = 0; // 本次读取
+
+        while ( remain > 0 ) {
+            ssize_t n = m_sock.receive(buffer.data() + buffer.size(), remain, e);
+            if ( n > 0 ) {
+                buffer.resize( buffer.size() + n);
+                remain = buffer.limit() - buffer.size();
+                total += n;
+                continue;
+            } else if ( n == 0 ) {
+                break;     // 没读到消息
+            } else {
+                return -1; // 读失败
+            }
+        }
+
+        return (int)total;
+    }
+
+    inline 
+    bool SocketChannel::shutdown(int how, err::Error *e) 
+    { 
+        m_shutFlags |= how; 
+        return m_sock.shutdown(how, e); 
+    }
+
+    inline 
+    bool SocketChannel::close(err::Error * e )
+    {
+        m_shutFlags = net::shutdownBoth;
+        return m_sock.close(e);
+    }
+    
     inline 
     bool SocketListener::open(const net::Address & localAddr, err::Error * e)
     {
@@ -389,14 +456,14 @@ namespace nio
             auto itEntry = this->m_channelMap.find(channel);
             assert(itEntry != this->m_channelMap.end());
             auto & entry = itEntry->second;
-            if ( how & shutdownWrite ) {
+            if ( how & net::shutdownWrite ) {
                 io::ConstBuffer * buf;
                 while ( buf = entry.channel->peekOutputBuffer() ) {
                     entry.sendCb(channel, statusCancel, *buf);
                     entry.channel->popOutputBuffer();
                 }
             }
-            if ( how & shutdownRead ) {
+            if ( how & net::shutdownRead ) {
                 io::MutableBuffer * buf;
                 while ( buf = entry.channel->peekInputBuffer() ) {
                     entry.recvCb(channel, statusCancel, *buf);
@@ -594,7 +661,7 @@ namespace nio
         m_impl->m_selector.remove( fd, e);   // remove fd from selector synchronized
         channel->close(e);
         
-        m_impl->pushShutdownRequest(fd, shutdownBoth);
+        m_impl->pushShutdownRequest(fd, net::shutdownBoth);
         m_impl->pushChannelCloseRequest(fd);
         return true;
     }

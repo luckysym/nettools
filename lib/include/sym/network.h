@@ -48,6 +48,13 @@ namespace net {
         char * path;
     } location_t;
 
+
+    enum {
+        shutdownRead  = SHUT_RD,
+        shutdownWrite = SHUT_WR,
+        shutdownBoth  = shutdownRead + shutdownWrite
+    };
+
     class Address {
     public:
         Address();
@@ -63,11 +70,14 @@ namespace net {
         Socket() {}
         Socket(int fd) : m_fd(fd) {}
         int  accept(Address * remote, err::Error * e = nullptr);
+        bool bind(const Address & addr, err::Error * e = nullptr);
         bool close(err::Error *e = nullptr);
         bool create(int af, int type, err::Error *e = nullptr);
-        bool bind(const Address & addr, err::Error * e = nullptr);
+        int  fd() const  { return m_fd; }
         bool listen(err::Error * e = nullptr);
-        int fd() const  { return m_fd; }
+        int  receive(char * buf, int len, err::Error * e = nullptr);
+        int  send(const char * buf, int len, err::Error *e = nullptr);
+        bool shutdown(int how, err::Error *e = nullptr);
     }; // end class Socket
 
     /// init a location struct
