@@ -270,7 +270,7 @@ namespace nio
 
         int rv = ::epoll_ctl(m_epfd, EPOLL_CTL_ADD, fd, &evt);
         if ( rv == -1 ) {
-            if ( e ) *e = err::Error(errno, err::Error::dmSystem);
+            if ( e ) *e = err::Error(errno, err::dmSystem);
             return false;
         }
         
@@ -300,7 +300,7 @@ namespace nio
         m_events.erase(fd);
         int rv = epoll_ctl(m_epfd, EPOLL_CTL_DEL, fd, nullptr);
         if ( rv != 0 ) {
-            if ( e ) *e = err::Error(errno, err::Error::dmSystem);            
+            if ( e ) *e = err::Error(errno, err::dmSystem);            
             return false;
         }
 
@@ -328,7 +328,7 @@ namespace nio
 
         int rv = epoll_ctl(m_epfd, EPOLL_CTL_MOD, fd, &evt);
         if ( rv == -1 )  {
-            if ( e ) *e = err::Error(errno, err::Error::dmSystem);            
+            if ( e ) *e = err::Error(errno, err::dmSystem);            
             return false;
         }
 
@@ -354,7 +354,7 @@ namespace nio
 
         int rv = epoll_ctl(m_epfd, EPOLL_CTL_MOD, fd, &evt);
         if ( rv == -1 )  {
-            if ( e ) *e = err::Error(errno, err::Error::dmSystem);            
+            if ( e ) *e = err::Error(errno, err::dmSystem);            
             return false;
         }
 
@@ -380,7 +380,7 @@ namespace nio
             }
             return rv;
         } else if ( rv < 0) {
-            if ( e ) *e = err::Error(errno, err::Error::dmSystem);
+            if ( e ) *e = err::Error(errno, err::dmSystem);
         }
 
         return rv;
@@ -463,7 +463,7 @@ namespace nio
     bool SocketListener::open(const net::Address & localAddr, err::Error * e)
     {
         bool isok;
-        isok = m_sock.create(localAddr.af(), SOCK_STREAM, e);
+        isok = m_sock.create(localAddr.af(), SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, e);
         if ( !isok ) return false;
 
         isok = m_sock.bind(localAddr, e);
@@ -484,7 +484,7 @@ namespace nio
     inline
     int SocketListener::acceptFd(net::Address * remote, err::Error * e)
     {
-        return m_sock.accept(remote, e);
+        return m_sock.accept(remote, SOCK_NONBLOCK | SOCK_CLOEXEC, e);
     }
     
     inline 

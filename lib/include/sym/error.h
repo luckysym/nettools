@@ -28,14 +28,16 @@ namespace err {
 
     void trace_stderr(const char * file, int line, const char * format, ...);
 
+    /// error domain
+    enum EnumErrorDomain {
+        dmNone,
+        dmSystem
+    };
+
     /// 错误信息封装类
     class Error { 
     public:
-        /// error domain
-        enum {
-            dmNone,
-            dmSystem
-        };
+        
     private:
         int         m_code;
         int         m_domain;
@@ -61,7 +63,7 @@ namespace err
     inline 
     Error::Error(int code, int domain ) : m_code(code ) , m_domain(domain)
     {
-        if ( domain == Error::dmSystem ) {
+        if ( domain == dmSystem ) {
             m_message.assign(strerror(code));
         }
         m_domain = domain;
@@ -69,7 +71,7 @@ namespace err
 
     inline
     Error::Error( int code, const char * msg) 
-        : m_code( code ), m_domain(Error::dmNone), m_message (msg?msg:"") 
+        : m_code( code ), m_domain(dmNone), m_message (msg?msg:"") 
     { }
 
     inline 
