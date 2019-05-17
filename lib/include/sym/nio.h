@@ -212,7 +212,7 @@ namespace nio
 
         int   addListener(const net::Address &loc, const ListenerCallback & callback, err::Error * e = nullptr);
 
-        bool  beginReceive(int channel, io::MutableBuffer & buffer);
+        bool  beginReceive(int channel, io::MutableBuffer & buffer, err::Error *e = nullptr);
 
         void  exitLoop();
 
@@ -269,7 +269,10 @@ namespace nio
         bool shutdown(int how, err::Error *e = nullptr);
         int  shutdownFlags() const { return m_shutFlags; }
         int  sendSome(err::Error * e = nullptr);
-        int  pushOutputBuffer(const io::ConstBuffer & buf);
+        
+        void  pushInputBuffer(const io::MutableBuffer & buf);
+        void  pushOutputBuffer(const io::ConstBuffer & buf);
+
         io::MutableBuffer * peekInputBuffer();
         io::ConstBuffer * peekOutputBuffer();
         
@@ -650,6 +653,16 @@ namespace nio
         ImplClass::ListenerEntry entry{ptrListener.release(), cb};
         m_impl->m_listenerMap[ fd ] = entry;
         return fd;
+    }
+
+    inline 
+    bool  SimpleSocketServer::beginReceive(int channel, io::MutableBuffer & buffer, err::Error *e)
+    {
+        SocketChannel * pch = m_impl->getChannel(channel);
+        assert( pch );
+
+        pch->pushInputBuffer(buffer);
+        return m_impl->m_selector.set(channel, selectRead, e);
     }
 
     inline
