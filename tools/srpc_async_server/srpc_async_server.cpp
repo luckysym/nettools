@@ -106,7 +106,7 @@ void RecvCallback::operator()(int fd, int status, io::MutableBuffer & buffer)
         // 读消息失败，channel关闭
         SYM_TRACE_VA("[error] channel read error, fd: %d", fd);
         if ( buffer.data()) free(buffer.detach());
-        m_server.shutdownChannel(fd, nio::SimpleSocketServer::shutdownRead);
+        m_server.shutdownChannel(fd, net::shutdownRead);
         // return false;  // 回调后不再接收消息, b不需要返回
     }
 
@@ -126,7 +126,7 @@ void RecvCallback::operator()(int fd, int status, io::MutableBuffer & buffer)
         // 消息头magic不正确，连接需要关闭
         SYM_TRACE_VA("[error] channel message error, fd: %d", fd);
         free(buffer.detach());
-        m_server.shutdownChannel(fd, nio::SimpleSocketServer::shutdownRead);
+        m_server.shutdownChannel(fd, net::shutdownRead);
         // return false;
     }
 
@@ -193,7 +193,7 @@ void SendCallback::operator()(int fd, int status, io::ConstBuffer & buffer)
 
     free((void *)buffer.detach());
 
-    m_server.shutdownChannel(fd, nio::SimpleSocketServer::shutdownBoth);
+    m_server.shutdownChannel(fd, net::shutdownBoth);
 }
 
 void CloseCallback::operator()(int fd)
