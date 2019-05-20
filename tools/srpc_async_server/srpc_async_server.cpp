@@ -95,8 +95,9 @@ void ListenerCallback::operator()(int sfd, int cfd, const net::Address * remote)
     m_server.acceptChannel(cfd, RecvCallback(m_server), SendCallback(m_server), CloseCallback(m_server), &error);
     
     // 开始接收消息
-    io::MutableBuffer buffer(new char[1024], 0, 1024);
+    io::MutableBuffer buffer(new char[1024], 1024);
     buffer.limit(sizeof(srpc::srpc_message_header));
+    SYM_TRACE_VA("[trace] recv buffer created, ptr: %p, cap: %d", buffer.data(), buffer.capacity());
     m_server.beginReceive(cfd, buffer);
 }
 
@@ -106,17 +107,20 @@ void RecvCallback::operator()(int fd, int status, io::MutableBuffer & buffer)
         // 读消息失败，channel关闭
         SYM_TRACE_VA("[error] channel read error, fd: %d", fd);
         if ( buffer.data()) free(buffer.detach());
-        m_server.shutdownChannel(fd, net::shutdownRead);
+        m_server.closeChannel(fd);
         // return false;  // 回调后不再接收消息, b不需要返回
+        return;
     }
 
     // 一般首次读消息时，缓存还没分配，先分配缓存
+    // 如果调用的beginReceive已经分配了缓存，这里就不用再分配。
     if ( buffer.data() == nullptr ) {
+        SYM_TRACE_VA("[error] ON_RECV, buffer alloc, fd: %d", fd);
         char * p = (char *)malloc(1024);
         buffer.attach(p, 1024);   // 缓存挂到buffer
         buffer.resize(0);         // 有效数据为0
         buffer.limit(sizeof(srpc::message_header_t));  // 先接收报文头
-        // return true;   // 回调后自动继续接收 不需要返回
+        return; // 回调后自动继续接收 不需要返回
     }
 
     // 后续缓存已经分配，就检查收到的数据
@@ -124,14 +128,14 @@ void RecvCallback::operator()(int fd, int status, io::MutableBuffer & buffer)
     bool isok = message_check_magic(msg);
     if ( !isok ) {
         // 消息头magic不正确，连接需要关闭
-        SYM_TRACE_VA("[error] channel message error, fd: %d", fd);
+        SYM_TRACE_VA("[error] channel message magic word invalid, fd: %d", fd);
         free(buffer.detach());
-        m_server.shutdownChannel(fd, net::shutdownRead);
-        // return false;
+        m_server.closeChannel(fd);
+        return;
     }
 
     // 检查收到的消息长度，是否接收完整。
-    size_t rsize = buffer.size();
+    size_t rsize = buffer.size();    // 当前已经接收到的数据大小
     size_t msize = io::btoh(msg->header.length);
     if ( rsize == msize ) {
         // 消息总长等于收到的长度，当前消息接收完成
@@ -144,6 +148,7 @@ void RecvCallback::operator()(int fd, int status, io::MutableBuffer & buffer)
         buffer.reset();  // 缓存倒回, limit = cap, size = 0;
         buffer.limit(sizeof(srpc::message_header_t));
         // return true;  // 接续接收
+        return ;
     }
 
     // 消息长度和当前收到的不一致，通常是收到消息头，需要扩充内存，继续接收
@@ -160,7 +165,8 @@ void RecvCallback::operator()(int fd, int status, io::MutableBuffer & buffer)
         }
 
         buffer.limit(msize);
-        // return true; // 继续收包体
+        SYM_TRACE_VA("[trace] ON_RECV, buffer realloc, %d", (int)msize);
+        return ;
     } else {
         // 收到了一半消息体或消息头，一般不会有这种问题。
         assert("bad message length" == nullptr);
@@ -193,7 +199,7 @@ void SendCallback::operator()(int fd, int status, io::ConstBuffer & buffer)
 
     free((void *)buffer.detach());
 
-    m_server.shutdownChannel(fd, net::shutdownBoth);
+    m_server.closeChannel(fd);
 }
 
 void CloseCallback::operator()(int fd)

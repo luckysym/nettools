@@ -61,7 +61,6 @@ namespace net {
         shutdownBoth  = shutdownRead + shutdownWrite
     };
 
-
     class Address {
     public:
         static const int ADDR_BUFFER_LEN  = 128;
@@ -567,18 +566,6 @@ bool net::sockattr_from_protocol(net::socket_attrib * attr, const char * name)
     }
     return true;
 }
-inline 
-bool net::socket_shutdown(int fd, int how, err::error_t *e)
-{
-    int r = ::shutdown(fd, how);
-    if ( r == -1 ) {
-        if ( e ) err::push_error_info(e, 128, 
-            "socket_shutdown failed, fd:%d, how: %d, err: %d, %s", 
-            fd, how, errno, strerror(errno));
-        return false;
-    }
-    return true;
-}
 
 inline
 int net::socket_open_listener(const net::location *local, int options, err::error_info *err)
@@ -749,7 +736,6 @@ int net::socket_accept(int sfd, int sockopts, location_t *remote, err::error_t *
     }
 }
 
-
 namespace net
 {
     inline 
@@ -764,8 +750,13 @@ namespace net
             return rv;
         }
 
-        // error handler
-        if (e) *e = err::Error(errno, err::dmSystem);
+        // error handler, 对于中断或者非阻塞模式下没有新连接，虽然返回-1，但输出的Error中错误值是0.
+        int eno = errno;
+        if ( eno == EAGAIN || eno == EINTR ) {
+            if ( e ) e->clear();
+        } else {
+            if (e) *e = err::Error(eno, err::dmSystem);
+        }
         return -1;
     }
 
@@ -808,21 +799,28 @@ namespace net
     inline 
     bool Socket::shutdown(int how, err::Error * e)
     {
+        SYM_TRACE_VA("[trace] SOCKET_SHUTDOWN, fd: %d, how: %d", m_fd, how);
         int rv = ::shutdown(m_fd, how);
         SYM_SOCK_RV_RETURN(rv);
-    }  
+    }
 
     inline 
     int Socket::receive(char * buf, int len, err::Error * e)
     {
         ssize_t rv = ::recv(m_fd, buf, len, 0);
-        if ( rv > 0 )  return (int)rv;
-        else if ( rv == 0 ) {
-            if ( e ) *e = err::Error(-1, "connection is shutdown by peer");
+        if ( rv > 0 )  {
+            return (int)rv;
+        } else if ( rv == 0 ) {
+            if ( e ) *e = err::Error(-1, "connection is reset by peer");
             return -1;
         } else {
-            if ( e ) *e = err::Error(errno, err::dmSystem);
-            return -1;
+            int eno = errno;
+            if ( eno == EAGAIN || eno == EINTR )  {
+                return 0;
+            } else {
+                if ( e ) *e = err::Error(errno, err::dmSystem);
+                return -1;
+            }
         }
     }
 
@@ -832,8 +830,12 @@ namespace net
         ssize_t rv = ::send(m_fd, buf, len, 0);
         if ( rv >= 0 )  return (int)rv;
         else {
-            if ( e ) *e = err::Error(errno, err::dmSystem);
-            return -1;
+            int eno = errno;
+            if ( eno == EAGAIN || eno == EINTR ) return 0;
+            else {
+                if ( e ) *e = err::Error(errno, err::dmSystem);
+                return -1;
+            }
         }
     }
 

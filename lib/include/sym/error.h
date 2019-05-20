@@ -6,6 +6,7 @@
 #include <string.h>
 #include <errno.h>
 #include <string>
+#include <list>
 
 /// 包含异常错误以及过程跟踪相关数据结构和操作的名称空间。
 namespace err {
@@ -36,24 +37,27 @@ namespace err {
 
     /// 错误信息封装类
     class Error { 
-    public:
-        
     private:
-        int         m_code;
-        int         m_domain;
-        std::string m_message;
+        struct ErrorData {
+            int         m_code;
+            int         m_domain;
+            std::string m_message;
+        };
+    private:
+        ErrorData            m_data;
+        std::list<ErrorData> m_stack;
 
     public:
-        Error() : m_code(0), m_domain(dmNone) {}
+        Error();
         Error(int code, int domain);
         Error(int code, const char * message);
         ~Error() { this->clear(); }
         void clear();
 
-        int code () const { return m_code; }
-        const char * message() const { return m_message.c_str(); }
+        int code () const { return m_data.m_code; }
+        const char * message() const { return m_data.m_message.c_str(); }
 
-        operator bool() const { return m_code != 0; }
+        operator bool() const { return m_data.m_code != 0; }
     }; // end class Error
 
 } // end namespace err
@@ -61,22 +65,33 @@ namespace err {
 namespace err
 {
     inline 
-    Error::Error(int code, int domain ) : m_code(code ) , m_domain(domain)
+    Error::Error() : Error(0, dmNone) {}
+
+    inline 
+    Error::Error(int code, int domain )
     {
         if ( domain == dmSystem ) {
-            m_message.assign(strerror(code));
+            m_data.m_message.assign(strerror(code));
         }
-        m_domain = domain;
+        m_data.m_domain = domain;
+        m_data.m_code = code;
     }
 
     inline
     Error::Error( int code, const char * msg) 
-        : m_code( code ), m_domain(dmNone), m_message (msg?msg:"") 
-    { }
+    { 
+        m_data.m_domain = dmNone;
+        m_data.m_code = code;
+        m_data.m_message = msg?msg:"";
+    }
 
     inline 
-    void Error::clear() { m_code = 0; m_domain = dmNone; m_message.clear(); }
-
+    void Error::clear() { 
+        m_data.m_code = 0; 
+        m_data.m_domain = dmNone; 
+        m_data.m_message.clear(); 
+        m_stack.clear();
+    }
     
 } // end namespace err
 

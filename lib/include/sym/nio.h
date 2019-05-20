@@ -58,6 +58,9 @@ namespace nio
         EventVec       m_revents;
         EpollEventVec  m_epevents;
     public:
+        /// \brief 默认构造函数。
+        /// 
+        ///     在Linux系统下，创建并初始化一个epoll fd.
         Selector();
         ~Selector();
 
@@ -402,22 +405,17 @@ namespace nio
         if ( m_outputBuffers.empty()) return 0;  // 没有可发数据
         auto & buffer = m_outputBuffers.front();
         int remain = buffer.size() - buffer.position();
-        int total = 0;
-
-        while ( remain > 0 ) {
-            int n = m_sock.send(buffer.data() + buffer.position(), remain, e);
-            if ( n > 0 ) {
-                buffer.position( buffer.position() + n );
-                remain = buffer.size() - buffer.position();
-                total += n;
-                continue;
-            } else if ( n == 0 ) {
-                break;    // 没有发出，输出缓存已满
-            } else {
-                return -1;
-            }
+        
+        int n = m_sock.send(buffer.data() + buffer.position(), remain, e);
+        if ( n > 0 ) {
+            buffer.position( buffer.position() + n );
+            remain = buffer.size() - buffer.position();
+            return n;
+        } else if ( n == 0 ) {
+            return 0;    // 没有发出，输出缓存已满
+        } else {
+            return -1;
         }
-        return (int)total;
     }
 
     inline 
@@ -426,23 +424,18 @@ namespace nio
         if ( m_inputBuffers.empty() ) return 0;
         auto & buffer = m_inputBuffers.front();
         int remain = buffer.limit() - buffer.size();
-        int total = 0; // 本次读取
-
-        while ( remain > 0 ) {
-            ssize_t n = m_sock.receive(buffer.data() + buffer.size(), remain, e);
-            if ( n > 0 ) {
-                buffer.resize( buffer.size() + n);
-                remain = buffer.limit() - buffer.size();
-                total += n;
-                continue;
-            } else if ( n == 0 ) {
-                break;     // 没读到消息
-            } else {
-                return -1; // 读失败
-            }
+        
+        err::Error e2;
+        ssize_t n = m_sock.receive(buffer.data() + buffer.size(), remain, &e2);
+        if ( n > 0 ) {
+            buffer.resize( buffer.size() + n );
+            remain = buffer.limit() - buffer.size();
+            return n;
+        } else if ( n == 0 ) {
+            return 0;     // 没读到消息
+        } else {
+            return -1;    // 读取错误
         }
-
-        return (int)total;
     }
 
     inline 
@@ -491,18 +484,22 @@ namespace nio
     bool SimpleSocketServer::ImplClass::pushChannelCloseRequest(int channel)
     {
         auto request = [this, channel]() {
+            SYM_TRACE_VA("[trace] DO_CLOSE_RQUEST, channel: %d", channel);
             auto itEntry = this->m_channelMap.find(channel);
             assert(itEntry != this->m_channelMap.end());
             auto & entry = itEntry->second;
             entry.closeCb(channel);
             this->m_channelMap.erase(channel);
         };
+
+        m_requestQueue.push(request);
     }
 
     inline 
     bool SimpleSocketServer::ImplClass::pushShutdownRequest(int channel, int how)
     {
         auto request = [this, channel, how]() {
+            SYM_TRACE_VA("[trace] DO_SHUT_RQUEST, channel: %d, how: %d", channel, how);
             auto itEntry = this->m_channelMap.find(channel);
             assert(itEntry != this->m_channelMap.end());
             auto & entry = itEntry->second;
@@ -521,6 +518,7 @@ namespace nio
                 }
             }
         };
+        m_requestQueue.push(request);
     }
 
     inline 
@@ -549,14 +547,17 @@ namespace nio
 
         // 循环接收，直到没有数据可收
         while ( ( recvSize = channel->receiveSome() ) > 0 ) {
+            SYM_TRACE_VA("[trace] ON_READABLE, received: %d", (recvSize));
             io::MutableBuffer * buf = channel->peekInputBuffer();
             if ( buf->size() == buf->limit() ) {
                 entry.recvCb(channel->fd(), statusOk, *buf);
+                break;  // 回调执行后不再继续读，因为如果收到的数据异常，再回调中channel已经被执行close操作。
             }
         } // end while
 
         // 接收失败，回调
         if ( recvSize < 0 )  {
+            SYM_TRACE_VA("[error] ON_READABLE_ERROR, received: %d", (recvSize));
             entry.recvCb(channel->fd(), statusError, *channel->peekInputBuffer());
             channel->popInputBuffer();
             m_selector.cancel(channel->fd(), selectRead);
@@ -622,13 +623,14 @@ namespace nio
                 if ( cfd >= 0 ) {
                     itEntry->second.callback(listener->fd(), cfd, &remote);
                 } else if ( !error ) {
+                    SYM_TRACE("[trace] no more connection to accept");
                     break;  // 所有排队的连接都已获取
                 } else {
-                    // 获取连接失败, 执行异常回调，回调过程通常关闭该监听。
+                    // 获取连接失败, 执行异常回调，回调过程通常关闭该监听
+                    SYM_TRACE_VA("[error] accept connection failed, %s", error.message());
                     itEntry->second.callback(listener->fd(), -1, nullptr);
                     break;
                 }
-                error.clear();
             }
         } 
         if ( event->sevents() & selectError ) {
@@ -739,9 +741,9 @@ namespace nio
     }
 
     inline 
-    void SimpleSocketServer::setIdleInterval(int ms) 
+    void SimpleSocketServer::setIdleInterval(int sec) 
     {
-        m_impl->m_idleInterval = ms;
+        m_impl->m_idleInterval = sec * 1000;
     }
 
     inline
@@ -811,6 +813,7 @@ namespace nio
     {
         auto itChannelEntry = m_impl->m_channelMap.find(channel);
         if ( itChannelEntry == m_impl->m_channelMap.end() ) {
+            SYM_TRACE_VA("[error] SHUT_CHANNEL_NOT_FOUND: channel: %d, how: %d", channel, how);
             if (  e ) *e = err::Error(-1, "unknown channel id");
             return false;
         }
