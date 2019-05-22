@@ -34,6 +34,8 @@ namespace io {
     int32_t btoh(int32_t n);
     int64_t btoh(int64_t n);
 
+    int32_t htob(int32_t n);
+    int64_t htob(int64_t n);
 
     class BufferBase {
     private:
@@ -134,21 +136,39 @@ namespace io {
 
 } // end namespace io
 
-inline 
-int32_t io::btoh(int32_t n) {
-# ifdef HOST_BIG_ENDIAN
-# error("big-endian not supported")
-# else 
-    int32_t r;
-    unsigned char * p0 = (unsigned char *)&n;
-    unsigned char * p1 = (unsigned char *)&r;
-    p1[0] = p0[3];
-    p1[1] = p0[2];
-    p1[2] = p0[1];
-    p1[3] = p0[0];
-    return r;
-# endif
-}
+
+#ifndef SYM_BYTEORDER_CONVERT_16
+#define SYM_BYTEORDER_CONVERT_16(s, t) \
+do {    \
+    t[0] = s[1]; \
+    t[1] = s[0];   \
+} while (0)
+#endif // SYM_BYTEORDER_CONVERT_16
+
+#ifndef SYM_BYTEORDER_CONVERT_32
+#define SYM_BYTEORDER_CONVERT_32(s, t) \
+do {    \
+    t[0] = s[3]; \
+    t[1] = s[2]; \
+    t[2] = s[1]; \
+    t[3] = s[0];    \
+} while (0) 
+#endif // SYM_BYTEORDER_CONVERT_32
+
+#ifndef SYM_BYTEORDER_CONVERT_64
+#define SYM_BYTEORDER_CONVERT_64(s, t) \
+do { \
+    t[0] = s[7];    \
+    t[1] = s[6];    \
+    t[2] = s[5];    \
+    t[3] = s[4];    \
+    t[4] = s[3];    \
+    t[5] = s[2];    \
+    t[6] = s[1];    \
+    t[7] = s[0];    \
+} while (0)
+#endif // SYM_BYTEORDER_CONVERT_64
+
 
 inline 
 int64_t io::btoh(int64_t n) {
@@ -158,14 +178,46 @@ int64_t io::btoh(int64_t n) {
     int64_t r;
     unsigned char * p0 = (unsigned char *)&n;
     unsigned char * p1 = (unsigned char *)&r;
-    p1[0] = p0[7];
-    p1[1] = p0[6];
-    p1[2] = p0[5];
-    p1[3] = p0[4];
-    p1[4] = p0[3];
-    p1[5] = p0[2];
-    p1[6] = p0[1];
-    p1[7] = p0[0];
+    SYM_BYTEORDER_CONVERT_64(p0, p1);
+    return r;
+# endif
+}
+
+inline 
+int32_t io::btoh(int32_t n) {
+# ifdef HOST_BIG_ENDIAN
+# error("big-endian not supported")
+# else 
+    int32_t r;
+    unsigned char * p0 = (unsigned char *)&n;
+    unsigned char * p1 = (unsigned char *)&r;
+    SYM_BYTEORDER_CONVERT_32(p0, p1);
+    return r;
+# endif
+}
+
+inline 
+int64_t io::htob(int64_t n) {
+# ifdef HOST_BIG_ENDIAN
+# error("big-endian not supported")
+# else 
+    int64_t r;
+    unsigned char * p0 = (unsigned char *)&n;
+    unsigned char * p1 = (unsigned char *)&r;
+    SYM_BYTEORDER_CONVERT_64(p0, p1);
+    return r;
+# endif
+}
+
+inline 
+int32_t io::htob(int32_t n) {
+# ifdef HOST_BIG_ENDIAN
+# error("big-endian not supported")
+# else 
+    int32_t r;
+    unsigned char * p0 = (unsigned char *)&n;
+    unsigned char * p1 = (unsigned char *)&r;
+    SYM_BYTEORDER_CONVERT_32(p0, p1);
     return r;
 # endif
 }
