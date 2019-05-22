@@ -77,6 +77,12 @@ namespace nio
     class SocketChannel;
     class SocketListener;
 
+    enum class EnumIoType
+    {
+        ioSocketChannel,
+        ioSocketListener
+    };
+
     /**
      * @brief 简单的Socket服务端类。
      * 
@@ -137,12 +143,6 @@ namespace nio
 
 namespace nio 
 {
-    enum class EnumIoType
-    {
-        ioSocketChannel,
-        ioSocketListener
-    };
-
     class IoBase {
     private:
         EnumIoType m_type;
@@ -168,13 +168,23 @@ namespace nio
         int  fd() const { return m_sock.fd(); }
         bool close(err::Error * e = nullptr);
 
-        int  receive(io::MutableBuffer & buffer, int timeout, err::Error * e = nullptr);
+        /// 执行一次recv操作，无论是否收到数据。收到的数据写入队列缓存。
+        int  receive(err::Error * e = nullptr);
+
+        /// 执行一次或多次recv操作，直到收到Limit大小的数据，或者超时。
+        int  receiveN(io::MutableBuffer & buffer, int timeout, err::Error * e = nullptr);
+
+        /// 执行一次或多次recv操作，直到受收到任意数量的字节(>0)，或者超时。
         int  receiveSome(io::MutableBuffer & buffer, int timeout, err::Error * e = nullptr);
-        int  receiveSome(err::Error * e = nullptr);
         
-        int  send(io::ConstBuffer & buffer, int timeout, err::Error *e = nullptr);
+        /// 对当前发送队列缓存执行一次send操作，无论是否有数据发送出去都将返回。
+        int  send(err::Error * e = nullptr);
+
+        /// 执行一次或多次send操作，直到limit大小的数据被发送，或者超时，才返回。
+        int  sendN(io::ConstBuffer & buffer, int timeout, err::Error *e = nullptr);
+
+        /// 执行一次或多次send操作，直到有任意数量(>0)数据被发送,或者超时，才返回。
         int  sendSome(io::ConstBuffer & buffer, int timeout, err::Error *e = nullptr);
-        int  sendSome(err::Error * e = nullptr);
         
         bool shutdown(int how, err::Error *e = nullptr);
         int  shutdownFlags() const { return m_shutFlags; }
@@ -189,8 +199,9 @@ namespace nio
         void popOutputBuffer() { if ( !m_outputBuffers.empty()) m_outputBuffers.pop(); }
         
     private:
-        int  waitForRead(int timeout);
-        int  waitForWrite(int timeout);
+        /// 等待特定的事件，events取值selectRead/selectWrite组合，timeout单位毫秒（-1不超时）
+        /// 返回值是selectRead/selectWrite/selectError的组合，或者0表示超时，-1表示Poll异常
+        int  wait(int events, int timeout, err::Error * e = nullptr);
     }; // end class SocketChannel
 
     class SocketListener : public IoBase {
@@ -411,25 +422,53 @@ namespace nio
 namespace nio
 {
     inline 
-    int SocketChannel::waitForRead(int timeout)
+    int SocketChannel::wait(int events, int timeout, err::Error * e)
     {
         struct pollfd pfd;
         pfd.fd = m_sock.fd();
-        pfd.events = POLLIN;
-        return ::poll(&pfd, 1, timeout);
+        pfd.events = 0;
+        if ( events & selectRead ) pfd.events |= POLLIN;
+        if ( events & selectWrite) pfd.events |= POLLOUT;
+        int r = 0;
+        int64_t now = chrono::now();
+        int64_t now1 = now;
+        int     timeout1 = timeout;
+        int     revents = 0;
+        while (1) {
+            r = ::poll(&pfd, 1, timeout1);
+            if ( r >= 0 ) {
+                if ( pfd.revents & POLLIN ) revents |= selectRead;
+                if ( pfd.revents & POLLOUT) revents |= selectWrite;
+                if ( pfd.revents & POLLERR) revents |= selectError;
+                break;
+            } else {
+                int eno = errno;
+                if ( eno == EINTR ) {
+                    if ( timeout > 0 ) {
+                        now1 = chrono::now();
+                        timeout1 = timeout - (int)((now1 - now) / 1000);
+                        // 为了避免极端情况，差一点点超时时被中断，但上面取时间再计算后变得超时
+                        // 这里也是需要判断一把，否则timeout1<0，循环出去就变成永不超时了
+                        if ( timeout1 < 0 ) {
+                            revents = 0; 
+                            break;   // 设置返回超时并推出循环
+                        }
+                    }
+                    continue;
+                }
+                else {
+                    // 这里就是poll完全异常了
+                    revents = -1;
+                    if( e ) *e = err::Error(eno, err::dmSystem);
+                    break;
+                }
+            } // if r
+        } // while
+        return revents;
     }
 
     inline 
-    int SocketChannel::waitForWrite(int timeout)
-    {
-        struct pollfd pfd;
-        pfd.fd = m_sock.fd();
-        pfd.events = POLLOUT;
-        return ::poll(&pfd, 1, timeout);
-    }
-
-    inline 
-    int SocketChannel::receiveSome(err::Error * e)
+    int SocketChannel::receive(err::Error * e)
     {
         if ( m_inputBuffers.empty() ) return 0;
         auto & buffer = m_inputBuffers.front();
@@ -458,14 +497,17 @@ namespace nio
         char * ptr = buffer.data() + buffer.size();
         err::Error e1;
 
-        e1.clear();
         total = m_sock.receive(ptr, remain, &e1);
         if ( total == 0 ) {
             // 没有收到消息，则等待
-            int w = this->waitForRead(timeout);
-            if ( w > 0 ) total = m_sock.receive(ptr, remain, &e1);
+            int w = this->wait(selectRead, timeout, &e1);
+            if ( w & selectRead ) total = m_sock.receive(ptr, remain, e);
+            else if ( w & selectError ) {
+                if ( e ) *e = err::Error(-1, "poll read error event");
+                total = -1;
+            }
             else if ( w < 0 ) {
-                if ( e ) *e = err::Error(-1, "Wait error");
+                if ( e ) *e = e1;
                 total = -1;   // 等待错误等同与接收错误
             }
         }
@@ -474,7 +516,7 @@ namespace nio
     }
 
     inline
-    int SocketChannel::receive(io::MutableBuffer & buffer, int timeout, err::Error * e)
+    int SocketChannel::receiveN(io::MutableBuffer & buffer, int timeout, err::Error * e)
     {
         int remain = buffer.limit() - buffer.size();
         int total  = 0;
@@ -487,44 +529,46 @@ namespace nio
         int     timeout1 = timeout;
         err::Error e1;
 
-        while ( remain > 0 && timeout1 > 0 ) {
+        do {
             e1.clear();
-            int n = m_sock.receive(ptr + total, remain - total, &e1);
+            int n = m_sock.receive(ptr + total, remain - total, e);  // 收一次
             if ( n > 0 ) {
-                // 收到了n个字节
-                total  += n;
+                total += n;
                 remain -= n;
+                continue;    // 收到了n个字节
             } else if ( n == 0 ) {
-                // 没有收到数据
-            } else {
-                // 接收异常
+                int w = this->wait(selectRead, timeout1, &e1);   // 没有收到，就等
+                if ( w & selectRead ) {
+                    if ( timeout > 0 ) {
+                        now1 = chrono::now();
+                        timeout1 = timeout - (int)((now1 - now) / 1000); 
+                        if ( timeout1 < 0 ) timeout1 = 0; // 这里避免极端情况
+                    }
+                    continue;        // 有数据了，继续收
+                } else if ( w & selectError ) {
+                    if ( e ) *e = err::Error(-1, "poll read error event");
+                    total = -1;
+                    break;
+                } else if ( w == 0 ) {
+                    total = 0; 
+                    break;    // 超时，退出
+                } else {     //  ( w < 0 ) 
+                    total = -1;
+                    if ( e ) *e = e1;
+                    break;    // 等待错误
+                } // if w
+            } else {   // n < 0 , receive error
+                total = -1;
                 break;
-            }
+            } // if n
+        } while ( remain > 0 );
 
-            struct pollfd pfd;
-            pfd.fd = m_sock.fd();
-            pfd.events = POLLIN;
-            int r = ::poll(&pfd, 1, timeout1);
-            if ( r < 0) {
-                if ( e ) *e = err::Error(-1, "Wait error");
-                break;   // 等待异常
-            }
-
-            if (timeout >= 0 ) {
-                now1 = chrono::now();
-                timeout1 = timeout - ((int)(now1 - now) / 1000 );
-            }
-        } // end while
-
-        buffer.resize( buffer.size() + total );
-
-        if ( remain == 0 ) return total;   // 数据收完
-        else if ( timeout1 <= 0 ) return 0; // 超时
-        else return -1;                    // 异常
-    }
+        if ( total > 0 ) buffer.resize( buffer.size() + total );
+        return total;
+    } // receiveN
 
     inline
-    int SocketChannel::sendSome(err::Error *e)
+    int SocketChannel::send(err::Error *e)
     {
         if ( m_outputBuffers.empty()) return 0;  // 没有可发数据
         auto & buffer = m_outputBuffers.front();
@@ -543,7 +587,39 @@ namespace nio
     }
     
     inline
-    int SocketChannel::send(io::ConstBuffer & buffer, int timeout, err::Error * e)
+    int SocketChannel::sendSome(io::ConstBuffer & buffer, int timeout, err::Error * e)
+    {
+        int remain = buffer.limit() - buffer.position();
+        int total  = 0;
+        assert ( remain >= 0 );
+
+        const char * ptr = buffer.data() + buffer.position();
+        
+        total = m_sock.send(ptr, remain, e);
+        if ( total == 0 ) {
+            // 没有数据被发送，需要等待
+            err::Error e1;
+            int w = this->wait(selectWrite, timeout, &e1);
+            if ( w & selectWrite ) {
+                total = m_sock.send(ptr, remain, e);   // 执行一次发送
+            } else if ( w & selectError) {
+                if ( e ) *e = err::Error(-1, "poll write error event");
+                total = -1;
+            }  
+            else if ( w == 0 ) {
+                total = 0;  // 超时
+            } else {
+                total = -1;
+                if ( e ) *e = e1;
+            }
+        }
+
+        if ( total > 0 ) buffer.position(buffer.position() + total);
+        return total;
+    }
+
+    inline
+    int SocketChannel::sendN(io::ConstBuffer & buffer, int timeout, err::Error * e)
     {
         int remain = buffer.limit() - buffer.position();
         int total  = 0;
@@ -553,39 +629,46 @@ namespace nio
         
         int64_t now = chrono::now();
         int64_t now1 = now;
-        int   timeout1 = timeout;
+        int     timeout1 = timeout;
         err::Error e1;
-        while ( remain > 0 && timeout1 > 0 ) {
+
+        do {
             e1.clear();
-            int n = m_sock.send(ptr + total, remain - total, &e1);
+            int n = m_sock.send(ptr + total, remain - total, e);  // 发一次
             if ( n > 0 ) {
-                // 发送了n个字节
-                total  += n;
+                total += n;
                 remain -= n;
-            } else if ( n < 0 ) {
-                // 接收异常
+                continue;    // 发出了n个字节
+            } else if ( n == 0 ) {
+                int w = this->wait(selectWrite, timeout1, &e1);   // 没有发出，就等
+                if ( w & selectWrite ) {
+                    if ( timeout > 0 ) {
+                        now1 = chrono::now();
+                        timeout1 = timeout - (int)((now1 - now) / 1000); 
+                        if ( timeout1 < 0 ) timeout1 = 0;
+                    }
+                    continue;        // 有数据了，继续发
+                } else if ( w & selectError ) {
+                    if ( e ) *e = err::Error(-1, "poll write error event");
+                    total = -1;
+                    break;
+                } else if ( w == 0 ) {
+                    total = 0; 
+                    break;    // 超时，退出
+                } else {     //  ( w < 0 ) 
+                    total = -1;
+                    if ( e ) *e = e1;
+                    break;    // 等待错误
+                } // if w
+            } else {   // n < 0 , send error
+                total = -1;
                 break;
-            }
+            } // if n
+        } while ( remain > 0 );
 
-            struct pollfd pfd;
-            pfd.fd = m_sock.fd();
-            pfd.events = POLLOUT;
-            int r = ::poll(&pfd, 1, timeout1);
-            if ( r < 0) {
-                if ( e ) *e = err::Error(-1, "Wait error");
-                break;   // 等待异常
-            }
-
-            now1 = chrono::now();
-            timeout1 = timeout - ((int)(now1 - now) / 1000);
-        } // end while
-
-        buffer.position( buffer.position() + total );
-
-        if ( remain == 0 ) return total;    // 数据收完
-        else if ( timeout1 <= 0 ) return 0; // 超时
-        else return -1;                     // 异常
-    }
+        if ( total > 0 ) buffer.position( buffer.position() + total );
+        return total;
+    } // receiveN
 
     inline 
     bool SocketChannel::shutdown(int how, err::Error *e) 
@@ -695,7 +778,7 @@ namespace nio
         ssize_t recvSize = 0;
 
         // 循环接收，直到没有数据可收
-        while ( ( recvSize = channel->receiveSome() ) > 0 ) {
+        while ( ( recvSize = channel->receive() ) > 0 ) {
             SYM_TRACE_VA("[trace] ON_READABLE, received: %d", (recvSize));
             io::MutableBuffer * buf = channel->peekInputBuffer();
             if ( buf->size() == buf->limit() ) {
@@ -717,7 +800,7 @@ namespace nio
     void SimpleSocketServer::ImplClass::onChannelWritable(ChannelEntry & entry)
     {
         SocketChannel * channel = entry.channel;
-        ssize_t n = channel->sendSome();
+        ssize_t n = channel->send();
         io::ConstBuffer * buf = channel->peekOutputBuffer();
         assert( buf );
 
