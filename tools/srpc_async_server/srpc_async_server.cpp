@@ -2,7 +2,7 @@
 #include <assert.h>
 #include <map>
 
-#define LOCAL_URL "0.0.0.0:40001"
+#define LOCAL_URL "0.0.0.0:8899"
 
 class ListenerCallback
 {
@@ -25,6 +25,8 @@ public:
 
     void sendResponse(int fd, const char * data, size_t len);
     void operator()(int fd, int status, io::MutableBuffer & buffer);
+
+    void onMessageReceived(srpc::message_t * in, io::ConstBuffer & out);
 };
 
 class SendCallback
@@ -142,8 +144,12 @@ void RecvCallback::operator()(int fd, int status, io::MutableBuffer & buffer)
         SYM_TRACE_VA("[info] message received, fd: %d, timestamp: %lld， len: %d", 
             fd, io::btoh(msg->header.timestamp), (int)msize);
         
+        io::ConstBuffer out;
+        this->onMessageReceived(msg, out);
+
         // 将消息发回
-        this->sendResponse(fd, buffer.data(), buffer.size());
+        this->sendResponse(fd, out.data(), out.size());
+        free((void *)out.detach());
         
         buffer.reset();  // 缓存倒回, limit = cap, size = 0;
         buffer.limit(sizeof(srpc::message_header_t));
@@ -157,7 +163,6 @@ void RecvCallback::operator()(int fd, int status, io::MutableBuffer & buffer)
 
         // 收到了包头，但还有包体要收，如果缓存不够，就扩充
         // 包总长等于包头长度，则是个空包，按以完成处理。
-        
         if ( msize > buffer.capacity()) {
             char * p = (char *)realloc(buffer.data(), msize);
             buffer.attach(p, msize);
@@ -173,6 +178,25 @@ void RecvCallback::operator()(int fd, int status, io::MutableBuffer & buffer)
     }
 }
 
+void RecvCallback::onMessageReceived(srpc::message_t * in, io::ConstBuffer & out)
+{
+    if ( in->header.body_type == io::htob(srpc::TYPE_LOGON_REQ)) {
+
+        SYM_TRACE("[trace] ON_LOGON_REQUEST_RECV");
+
+        srpc::logon_reply_t * p  = (srpc::logon_reply_t*)malloc(sizeof(srpc::logon_reply_t));
+        p->header = in->header;
+        p->regcode = io::htob(1);
+        p->result = 0;
+        p->suspend = 0;
+        p->window = 1;
+
+        out.attach((char *)p, sizeof(srpc::logon_reply_t));
+    } else {
+        abort();
+    }
+}
+
 void RecvCallback::sendResponse(int fd, const char * data, size_t len) 
 {
     char * outdata = (char *)malloc(len);
@@ -180,6 +204,7 @@ void RecvCallback::sendResponse(int fd, const char * data, size_t len)
 
     err::Error e;
     io::ConstBuffer buffer(outdata, len);
+    buffer.limit(len);
     bool isok = m_server.send(fd, buffer, &e);
     assert( isok );
     return ;
