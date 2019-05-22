@@ -7,6 +7,19 @@ namespace srpc {
     
     /// SRPC Magic Word
     const int16_t srpc_magic_word = 0x444F;
+
+    enum MessageBodyType
+	{
+		TYPE_UNKNOWN       = 0x00,   ///< 未知类型，一般表示报文未初始化
+		TYPE_LOGON_REQ     = 0x01,   ///< 连接验证请求
+		TYPE_LOGON_RES     = 0x02,   ///< 连接验证响应
+		TYPE_LOGOFF_REQ    = 0x03,   ///< 连接断开请求
+		TYPE_LOGOFF_RES    = 0x04,   ///< 连接断开响应
+		TYPE_HEARTBEAT_REQ = 0x07,   ///< 心跳帧请求
+		TYPE_HEARTBEAT_RES = 0x08,   ///< 心跳帧响应
+		TYPE_RPC_REQ       = 0x11,   ///< RPC执行请求
+		TYPE_RPC_RES       = 0x12    ///< RPC执行响应
+	};
     
     /// SRPC Message Header
     typedef struct srpc_message_header
@@ -28,6 +41,22 @@ namespace srpc {
         srpc_message_header header;   ///< header of the message
         char                body[0];  ///< body of the message 
     } message_t;
+
+    typedef struct srpc_logon_request {
+        srpc_message_header header;
+        int16_t client_length;
+	    int16_t server_length;
+        char  body[0];
+    } logon_request_t;
+
+    typedef struct sprc_logon_reply {
+        srpc_message_header header;
+        int32_t result;      ///< 登录结果状态值，参阅下文CCP_LOGONRES_RESULT_宏定义
+	    int16_t window;      ///< 消息发送窗口大小
+	    int16_t suspend;     ///< 服务器满载后，客户端连接需要挂起的时间秒数
+	    int64_t regcode;     ///< 注册码
+    } logon_reply_t;
+    
 
     /// check the magic of the message.
     bool message_check_magic(const message_t * m);  
