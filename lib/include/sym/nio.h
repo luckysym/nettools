@@ -10,6 +10,7 @@
 #include <sys/epoll.h>
 #include <sys/eventfd.h>
 #include <errno.h>
+#include <poll.h>
 #include <unistd.h>
 #include <assert.h>
 #include <string.h>
@@ -30,6 +31,7 @@ namespace nio
         selectError    = 8
     };
 
+    /// I/O多路复用选择器。在Linux环境下，基于EPOLL实现。
     class Selector {
     public:
         class Event
@@ -96,8 +98,6 @@ namespace nio
         typedef std::function<void (int status)> ServerCallback;
         typedef std::function<bool (int timer)>  TimerCallback;
 
-        
-
         enum {
             statusOk     =  0,     ///< 正常状态
             statusError  = -1,     ///< 错误状态
@@ -130,6 +130,7 @@ namespace nio
         bool  run(err::Error * e);
         bool  wakeup();
     }; // end class SimpleSocketServer
+
 } // end namespace nio
 
 #include <unordered_map>
@@ -155,8 +156,8 @@ namespace nio
         using InputBufferQueue = std::queue<io::MutableBuffer> ;
         using OutputBufferQueue = std::queue<io::ConstBuffer> ;
     private:
-        net::Socket  m_sock;
-        int          m_shutFlags  { 0 };
+        net::Socket       m_sock;
+        int               m_shutFlags  { 0 };
         InputBufferQueue  m_inputBuffers;
         OutputBufferQueue m_outputBuffers;
 
@@ -166,13 +167,20 @@ namespace nio
 
         int  fd() const { return m_sock.fd(); }
         bool close(err::Error * e = nullptr);
+
+        int  receive(io::MutableBuffer & buffer, int timeout, err::Error * e = nullptr);
+        int  receiveSome(io::MutableBuffer & buffer, int timeout, err::Error * e = nullptr);
         int  receiveSome(err::Error * e = nullptr);
-        bool shutdown(int how, err::Error *e = nullptr);
-        int  shutdownFlags() const { return m_shutFlags; }
+        
+        int  send(io::ConstBuffer & buffer, int timeout, err::Error *e = nullptr);
+        int  sendSome(io::ConstBuffer & buffer, int timeout, err::Error *e = nullptr);
         int  sendSome(err::Error * e = nullptr);
         
-        void  pushInputBuffer(const io::MutableBuffer & buf) { m_inputBuffers.push(buf); }
-        void  pushOutputBuffer(const io::ConstBuffer & buf)  { m_outputBuffers.push(buf); }
+        bool shutdown(int how, err::Error *e = nullptr);
+        int  shutdownFlags() const { return m_shutFlags; }
+
+        void  pushInputBuffer(io::MutableBuffer & buf) { m_inputBuffers.push(buf); }
+        void  pushOutputBuffer(io::ConstBuffer & buf)  { m_outputBuffers.push(buf); }
 
         io::MutableBuffer * peekInputBuffer() { return m_inputBuffers.empty()?nullptr:&m_inputBuffers.front(); }
         io::ConstBuffer * peekOutputBuffer()  { return m_outputBuffers.empty()?nullptr:&m_outputBuffers.front(); }
@@ -180,6 +188,9 @@ namespace nio
         void popInputBuffer() { if ( !m_inputBuffers.empty()) m_inputBuffers.pop(); }
         void popOutputBuffer() { if ( !m_outputBuffers.empty()) m_outputBuffers.pop(); }
         
+    private:
+        int  waitForRead(int timeout);
+        int  waitForWrite(int timeout);
     }; // end class SocketChannel
 
     class SocketListener : public IoBase {
@@ -399,23 +410,22 @@ namespace nio
 
 namespace nio
 {
-    inline
-    int SocketChannel::sendSome(err::Error *e)
+    inline 
+    int SocketChannel::waitForRead(int timeout)
     {
-        if ( m_outputBuffers.empty()) return 0;  // 没有可发数据
-        auto & buffer = m_outputBuffers.front();
-        int remain = buffer.size() - buffer.position();
-        
-        int n = m_sock.send(buffer.data() + buffer.position(), remain, e);
-        if ( n > 0 ) {
-            buffer.position( buffer.position() + n );
-            remain = buffer.size() - buffer.position();
-            return n;
-        } else if ( n == 0 ) {
-            return 0;    // 没有发出，输出缓存已满
-        } else {
-            return -1;
-        }
+        struct pollfd pfd;
+        pfd.fd = m_sock.fd();
+        pfd.events = POLLIN;
+        return ::poll(&pfd, 1, timeout);
+    }
+
+    inline 
+    int SocketChannel::waitForWrite(int timeout)
+    {
+        struct pollfd pfd;
+        pfd.fd = m_sock.fd();
+        pfd.events = POLLOUT;
+        return ::poll(&pfd, 1, timeout);
     }
 
     inline 
@@ -436,6 +446,145 @@ namespace nio
         } else {
             return -1;    // 读取错误
         }
+    }
+
+    inline 
+    int SocketChannel::receiveSome(io::MutableBuffer & buffer, int timeout, err::Error * e)
+    {
+        int remain = buffer.limit() - buffer.size();
+        int total = 0;
+        assert ( remain >= 0 );
+
+        char * ptr = buffer.data() + buffer.size();
+        err::Error e1;
+
+        e1.clear();
+        total = m_sock.receive(ptr, remain, &e1);
+        if ( total == 0 ) {
+            // 没有收到消息，则等待
+            int w = this->waitForRead(timeout);
+            if ( w > 0 ) total = m_sock.receive(ptr, remain, &e1);
+            else if ( w < 0 ) {
+                if ( e ) *e = err::Error(-1, "Wait error");
+                total = -1;   // 等待错误等同与接收错误
+            }
+        }
+        if ( total > 0 ) buffer.resize(buffer.size() + total);
+        return total;    // >0 收到数据，=0超时，<0错误。
+    }
+
+    inline
+    int SocketChannel::receive(io::MutableBuffer & buffer, int timeout, err::Error * e)
+    {
+        int remain = buffer.limit() - buffer.size();
+        int total  = 0;
+        assert ( remain >= 0 );
+
+        char * ptr = buffer.data() + buffer.size();
+        
+        int64_t now = chrono::now();
+        int64_t now1 = now;
+        int     timeout1 = timeout;
+        err::Error e1;
+
+        while ( remain > 0 && timeout1 > 0 ) {
+            e1.clear();
+            int n = m_sock.receive(ptr + total, remain - total, &e1);
+            if ( n > 0 ) {
+                // 收到了n个字节
+                total  += n;
+                remain -= n;
+            } else if ( n == 0 ) {
+                // 没有收到数据
+            } else {
+                // 接收异常
+                break;
+            }
+
+            struct pollfd pfd;
+            pfd.fd = m_sock.fd();
+            pfd.events = POLLIN;
+            int r = ::poll(&pfd, 1, timeout1);
+            if ( r < 0) {
+                if ( e ) *e = err::Error(-1, "Wait error");
+                break;   // 等待异常
+            }
+
+            if (timeout >= 0 ) {
+                now1 = chrono::now();
+                timeout1 = timeout - ((int)(now1 - now) / 1000 );
+            }
+        } // end while
+
+        buffer.resize( buffer.size() + total );
+
+        if ( remain == 0 ) return total;   // 数据收完
+        else if ( timeout1 <= 0 ) return 0; // 超时
+        else return -1;                    // 异常
+    }
+
+    inline
+    int SocketChannel::sendSome(err::Error *e)
+    {
+        if ( m_outputBuffers.empty()) return 0;  // 没有可发数据
+        auto & buffer = m_outputBuffers.front();
+        int remain = buffer.limit() - buffer.position();
+        
+        int n = m_sock.send(buffer.data() + buffer.position(), remain, e);
+        if ( n > 0 ) {
+            buffer.position( buffer.position() + n );
+            remain = buffer.limit() - buffer.position();
+            return n;
+        } else if ( n == 0 ) {
+            return 0;    // 没有发出，输出缓存已满
+        } else {
+            return -1;
+        }
+    }
+    
+    inline
+    int SocketChannel::send(io::ConstBuffer & buffer, int timeout, err::Error * e)
+    {
+        int remain = buffer.limit() - buffer.position();
+        int total  = 0;
+        assert ( remain >= 0 );
+
+        const char * ptr = buffer.data() + buffer.position();
+        
+        int64_t now = chrono::now();
+        int64_t now1 = now;
+        int   timeout1 = timeout;
+        err::Error e1;
+        while ( remain > 0 && timeout1 > 0 ) {
+            e1.clear();
+            int n = m_sock.send(ptr + total, remain - total, &e1);
+            if ( n > 0 ) {
+                // 发送了n个字节
+                total  += n;
+                remain -= n;
+            } else if ( n < 0 ) {
+                // 接收异常
+                break;
+            }
+
+            struct pollfd pfd;
+            pfd.fd = m_sock.fd();
+            pfd.events = POLLOUT;
+            int r = ::poll(&pfd, 1, timeout1);
+            if ( r < 0) {
+                if ( e ) *e = err::Error(-1, "Wait error");
+                break;   // 等待异常
+            }
+
+            now1 = chrono::now();
+            timeout1 = timeout - ((int)(now1 - now) / 1000);
+        } // end while
+
+        buffer.position( buffer.position() + total );
+
+        if ( remain == 0 ) return total;    // 数据收完
+        else if ( timeout1 <= 0 ) return 0; // 超时
+        else return -1;                     // 异常
     }
 
     inline 
