@@ -74,6 +74,8 @@ namespace err
         m_data.m_message.clear(); 
         m_stack.clear();
     }
+
+    void trace_stderr(const char * file, int line, const char * format, ...);
     
 } // end namespace err
 
