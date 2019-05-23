@@ -570,7 +570,10 @@ namespace nio
     inline
     int SocketChannel::send(err::Error *e)
     {
-        if ( m_outputBuffers.empty()) return 0;  // 没有可发数据
+        if ( m_outputBuffers.empty()) {
+            SYM_TRACE("SocketChannel::send, no send buffer");
+            return 0;  // 没有可发数据
+        }
         auto & buffer = m_outputBuffers.front();
         int remain = buffer.limit() - buffer.position();
         
@@ -578,6 +581,7 @@ namespace nio
         if ( n > 0 ) {
             buffer.position( buffer.position() + n );
             remain = buffer.limit() - buffer.position();
+            SYM_TRACE_VA("SocketChannel::send, data sent, %d", n);
             return n;
         } else if ( n == 0 ) {
             return 0;    // 没有发出，输出缓存已满
@@ -691,6 +695,8 @@ namespace nio
         isok = m_sock.create(localAddr.af(), SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, e);
         if ( !isok ) return false;
 
+        net::SocketOptReuseAddr soReuseAddr(m_sock, true);
+        
         isok = m_sock.bind(localAddr, e);
         if ( !isok ) {
             m_sock.close();
@@ -713,15 +719,23 @@ namespace nio
     }
     
     inline 
-    bool SimpleSocketServer::ImplClass::pushChannelCloseRequest(int channel)
+    bool SimpleSocketServer::ImplClass::pushChannelCloseRequest(int fd)
     {
-        auto request = [this, channel]() {
-            SYM_TRACE_VA("[trace] DO_CLOSE_RQUEST, channel: %d", channel);
-            auto itEntry = this->m_channelMap.find(channel);
+        auto request = [this, fd]() {
+
+            // 获取并关闭channel
+            SocketChannel * channel = this->getChannel(fd);
+            if ( channel == nullptr ) return;  // already closed
+
+            this->m_selector.remove( fd );   // remove fd from selector synchronized
+            channel->close();
+
+            SYM_TRACE_VA("[trace] DO_CLOSE_RQUEST, channel: %d", fd);
+            auto itEntry = this->m_channelMap.find(fd);
             assert(itEntry != this->m_channelMap.end());
             auto & entry = itEntry->second;
-            entry.closeCb(channel);
-            this->m_channelMap.erase(channel);
+            entry.closeCb(fd);
+            this->m_channelMap.erase(fd);
         };
 
         m_requestQueue.push(request);
@@ -803,6 +817,8 @@ namespace nio
         ssize_t n = channel->send();
         io::ConstBuffer * buf = channel->peekOutputBuffer();
         assert( buf );
+
+        SYM_TRACE_VA("SIMP_SOCK_SERVER::onChannelWritable, channel; %d, sent; %d", channel->fd(), n);
 
         if ( n >= 0 ) {
             // 需要发送的数据发送完成, 执行回调，并将该缓存发送队列中取出
@@ -956,13 +972,6 @@ namespace nio
     inline
     bool SimpleSocketServer::closeChannel(int fd, err::Error * e) 
     {
-        SocketChannel * channel = m_impl->getChannel(fd);
-        if ( channel == nullptr ) return true;  // already closed
-
-        m_impl->m_selector.remove( fd, e);   // remove fd from selector synchronized
-        channel->close(e);
-        
-        m_impl->pushShutdownRequest(fd, net::shutdownBoth);
         m_impl->pushChannelCloseRequest(fd);
         return true;
     }
