@@ -100,6 +100,34 @@ namespace net {
         bool shutdown(int how, err::Error *e = nullptr);
     }; // end class Socket
 
+    class SocketOption 
+    {
+    public:
+        SocketOption(
+            Socket & sock, 
+            int level, 
+            int optname, 
+            void * optval, 
+            socklen_t optlen, 
+            err::Error * e = nullptr);
+    };
+
+    class SocketOptReuseAddr : public SocketOption 
+    {
+    public:
+        SocketOptReuseAddr(Socket & sock, int value, err::Error * e = nullptr)
+            : SocketOption(sock, SOL_SOCKET, SO_REUSEADDR, &value, sizeof(value), e) 
+        {}
+    }; // end class SocketOptReuseAddr
+
+    class SocketOptKeepAlive : public SocketOption 
+    {
+    public:
+        SocketOptKeepAlive(Socket & sock, int value, err::Error * e = nullptr)
+            : SocketOption(sock, SOL_SOCKET, SO_KEEPALIVE, &value, sizeof(value), e)
+        {}
+    };
+
 } // end namespace net 
 
 namespace net
@@ -259,6 +287,22 @@ namespace net
         }
         if ( res ) freeaddrinfo(res);
         return retlen;
+    }
+
+    inline 
+    SocketOption::SocketOption(
+        Socket & sock, 
+        int level, 
+        int optname, 
+        void * optval, 
+        socklen_t optlen, 
+        err::Error * e)
+    {
+        int r = ::setsockopt(sock.fd(), level, optname, optval, optlen);
+        if ( r == -1 ) {
+            if ( e ) *e = err::Error(errno, err::dmSystem);
+        }
+        return ;
     }
 
 } // end namespace net
