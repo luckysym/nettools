@@ -23,7 +23,7 @@ public:
     RecvCallback(nio::SimpleSocketServer & server, int sendtimeout = 5000) 
         : m_server(server) , m_sendTimeout(sendtimeout) {}
 
-    void sendResponse(int fd, const char * data, size_t len);
+    void sendResponse(int fd, io::ConstBuffer & outbuf);
     void operator()(int fd, int status, io::MutableBuffer & buffer);
 
     void onMessageReceived(srpc::message_t * in, io::ConstBuffer & out);
@@ -97,7 +97,7 @@ void ListenerCallback::operator()(int sfd, int cfd, const net::Address * remote)
     m_server.acceptChannel(cfd, RecvCallback(m_server), SendCallback(m_server), CloseCallback(m_server), &error);
     
     // 开始接收消息
-    io::MutableBuffer buffer(new char[1024], 1024);
+    io::MutableBuffer buffer(new char[1024], 0, 1024);
     buffer.limit(sizeof(srpc::srpc_message_header));
     SYM_TRACE_VA("[trace] recv buffer created, ptr: %p, cap: %d", buffer.data(), buffer.capacity());
     m_server.beginReceive(cfd, buffer);
@@ -119,8 +119,7 @@ void RecvCallback::operator()(int fd, int status, io::MutableBuffer & buffer)
     if ( buffer.data() == nullptr ) {
         SYM_TRACE_VA("[error] ON_RECV, buffer alloc, fd: %d", fd);
         char * p = (char *)malloc(1024);
-        buffer.attach(p, 1024);   // 缓存挂到buffer
-        buffer.resize(0);         // 有效数据为0
+        buffer.attach(p, 0, 1024);   // 缓存挂到buffer
         buffer.limit(sizeof(srpc::message_header_t));  // 先接收报文头
         return; // 回调后自动继续接收 不需要返回
     }
@@ -148,8 +147,7 @@ void RecvCallback::operator()(int fd, int status, io::MutableBuffer & buffer)
         this->onMessageReceived(msg, out);
 
         // 将消息发回
-        this->sendResponse(fd, out.data(), out.size());
-        free((void *)out.detach());
+        this->sendResponse(fd, out);
         
         buffer.reset();  // 缓存倒回, limit = cap, size = 0;
         buffer.limit(sizeof(srpc::message_header_t));
@@ -165,8 +163,7 @@ void RecvCallback::operator()(int fd, int status, io::MutableBuffer & buffer)
         // 包总长等于包头长度，则是个空包，按以完成处理。
         if ( msize > buffer.capacity()) {
             char * p = (char *)realloc(buffer.data(), msize);
-            buffer.attach(p, msize);
-            buffer.resize(rsize);
+            buffer.attach(p, rsize, msize);
         }
 
         buffer.limit(msize);
@@ -180,32 +177,34 @@ void RecvCallback::operator()(int fd, int status, io::MutableBuffer & buffer)
 
 void RecvCallback::onMessageReceived(srpc::message_t * in, io::ConstBuffer & out)
 {
-    if ( in->header.body_type == io::htob(srpc::TYPE_LOGON_REQ)) {
+    int16_t logon_req = srpc::TYPE_LOGON_REQ;
+    int16_t x = io::htob(logon_req);
+    if ( in->header.body_type == x) {
 
         SYM_TRACE("[trace] ON_LOGON_REQUEST_RECV");
 
         srpc::logon_reply_t * p  = (srpc::logon_reply_t*)malloc(sizeof(srpc::logon_reply_t));
         p->header = in->header;
+        p->header.body_type = io::htob((int16_t)srpc::TYPE_LOGON_RES);
+        p->header.timestamp = io::htob((int64_t)chrono::now());
         p->regcode = io::htob(1);
         p->result = 0;
         p->suspend = 0;
         p->window = 1;
 
-        out.attach((char *)p, sizeof(srpc::logon_reply_t));
+        out.attach((char *)p, sizeof(srpc::logon_reply_t), sizeof(srpc::logon_reply_t));
+        out.limit(sizeof(srpc::logon_reply_t));
     } else {
         abort();
     }
 }
 
-void RecvCallback::sendResponse(int fd, const char * data, size_t len) 
+void RecvCallback::sendResponse(int fd, io::ConstBuffer & outbuf) 
 {
-    char * outdata = (char *)malloc(len);
-    memcpy(outdata, data, len);
-
-    err::Error e;
-    io::ConstBuffer buffer(outdata, len);
-    buffer.limit(len);
-    bool isok = m_server.send(fd, buffer, &e);
+    SYM_TRACE_VA("SRPC_SEND_RESPONSE, buf: %p, pos: %d, limit: %d", 
+        outbuf.data(), outbuf.position(), outbuf.limit());
+    
+    bool isok = m_server.send(fd, outbuf);
     assert( isok );
     return ;
 }
@@ -224,7 +223,7 @@ void SendCallback::operator()(int fd, int status, io::ConstBuffer & buffer)
 
     free((void *)buffer.detach());
 
-    m_server.closeChannel(fd);
+    // m_server.closeChannel(fd);
 }
 
 void CloseCallback::operator()(int fd)
