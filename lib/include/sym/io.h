@@ -8,9 +8,11 @@
 namespace io {
 
     /// big endian to host endian
+    int16_t btoh(int16_t n);
     int32_t btoh(int32_t n);
     int64_t btoh(int64_t n);
 
+    int16_t htob(int16_t n);
     int32_t htob(int32_t n);
     int64_t htob(int64_t n);
 
@@ -23,16 +25,13 @@ namespace io {
 
     public:
         BufferBase() : m_capacity(0), m_size(0), m_position(0), m_limit(0) {}
-
-        BufferBase(size_t cap) : m_capacity(cap), m_size(0), m_position(0), m_limit(cap) {}
-        
-        BufferBase(size_t cap, size_t size) 
+        BufferBase(size_t size, size_t cap) 
             : m_capacity(cap), m_size(size), m_position(0), m_limit(cap) {}
         
         size_t capacity() const { return m_capacity; }
-        size_t size() const { return m_size; }
+        size_t size() const     { return m_size;     }
         size_t position() const { return m_position; }
-        size_t limit() const { return m_limit; }
+        size_t limit() const    { return m_limit;    }
 
         void resize(size_t n)   { assert(n <= m_capacity); m_size = n; }
         void position(size_t n) { assert(n <= m_size && n <= m_limit); m_position = n; }
@@ -51,25 +50,22 @@ namespace io {
 
     public:
         ConstBuffer() {}
-        ConstBuffer(const char * data, size_t size) : BufferBase(size, size), m_data(data) {}
-        ConstBuffer(const char * data, size_t size, size_t cap) : BufferBase(cap, size), m_data(data) 
+        ConstBuffer(const char * data, size_t size, size_t cap) 
+            : BufferBase(size, cap), m_data(data) 
         {
             BufferBase::limit(size);
         }
 
         const char * data() const { return m_data; }
         
-        void attach(const char *data, size_t size) {
-            *(BufferBase*)this = BufferBase(size);
-            m_data = data;
-        }
-
-        void attach(const char *data, size_t size, size_t cap) {
+        void attach(const char *data, size_t size, size_t cap) 
+        {
             *(BufferBase*)this = BufferBase(size, cap);
             m_data = data;
         }
 
-        const char * detach() {
+        const char * detach() 
+        {
             const char * p = m_data;
             m_data = nullptr;
             BufferBase::init();
@@ -86,22 +82,20 @@ namespace io {
         char * m_data { nullptr };
     public:
         MutableBuffer() {}
-        MutableBuffer(char * data, size_t cap) : BufferBase(cap), m_data(data) {}
-        MutableBuffer(char * data, size_t cap, size_t size) : BufferBase(cap, size), m_data(data) {}
+        MutableBuffer(char * data, size_t size, size_t cap) 
+            : BufferBase(size, cap), m_data(data) 
+        {}
 
         char * data() { return m_data; }
 
-        void attach(char * data, size_t cap) {
-            *(BufferBase*)this = BufferBase(cap);
-            m_data = data;
-        }
-
-        void attach(char *data, size_t size, size_t cap) {
+        void attach(char *data, size_t size, size_t cap) 
+        {
             *(BufferBase*)this = BufferBase(size, cap);
             m_data = data;
         }
 
-        char * detach() { 
+        char * detach() 
+        { 
             char * p = m_data;
             BufferBase::init();
             m_data = nullptr;
@@ -174,6 +168,19 @@ int32_t io::btoh(int32_t n) {
 }
 
 inline 
+int16_t io::btoh(int16_t n) {
+# ifdef HOST_BIG_ENDIAN
+# error("big-endian not supported")
+# else 
+    int32_t r;
+    unsigned char * p0 = (unsigned char *)&n;
+    unsigned char * p1 = (unsigned char *)&r;
+    SYM_BYTEORDER_CONVERT_16(p0, p1);
+    return r;
+# endif
+}
+
+inline 
 int64_t io::htob(int64_t n) {
 # ifdef HOST_BIG_ENDIAN
 # error("big-endian not supported")
@@ -195,6 +202,19 @@ int32_t io::htob(int32_t n) {
     unsigned char * p0 = (unsigned char *)&n;
     unsigned char * p1 = (unsigned char *)&r;
     SYM_BYTEORDER_CONVERT_32(p0, p1);
+    return r;
+# endif
+}
+
+inline 
+int16_t io::htob(int16_t n) {
+# ifdef HOST_BIG_ENDIAN
+# error("big-endian not supported")
+# else 
+    int16_t r;
+    unsigned char * p0 = (unsigned char *)&n;
+    unsigned char * p1 = (unsigned char *)&r;
+    SYM_BYTEORDER_CONVERT_16(p0, p1);
     return r;
 # endif
 }
