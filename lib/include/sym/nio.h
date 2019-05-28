@@ -696,7 +696,7 @@ namespace nio
         if ( !isok ) return false;
 
         net::SocketOptReuseAddr soReuseAddr(m_sock, true);
-        
+
         isok = m_sock.bind(localAddr, e);
         if ( !isok ) {
             m_sock.close();
@@ -793,8 +793,9 @@ namespace nio
 
         // 循环接收，直到没有数据可收
         while ( ( recvSize = channel->receive() ) > 0 ) {
-            SYM_TRACE_VA("[trace] ON_READABLE, received: %d", (recvSize));
             io::MutableBuffer * buf = channel->peekInputBuffer();
+            SYM_TRACE_VA("[trace] ON_READABLE, received: %d, limit: %d, size: %d", 
+                (recvSize), buf->limit(), buf->size());
             if ( buf->size() == buf->limit() ) {
                 entry.recvCb(channel->fd(), statusOk, *buf);
                 break;  // 回调执行后不再继续读，因为如果收到的数据异常，再回调中channel已经被执行close操作。

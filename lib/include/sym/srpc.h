@@ -10,15 +10,17 @@ namespace srpc {
 
     enum MessageBodyType
 	{
-		TYPE_UNKNOWN       = 0x00,   ///< 未知类型，一般表示报文未初始化
-		TYPE_LOGON_REQ     = 0x01,   ///< 连接验证请求
-		TYPE_LOGON_RES     = 0x02,   ///< 连接验证响应
+        typeUnknown        = 0x00,   ///< 未知类型，一般表示报文未初始化
+        typeLogonRequest   = 0x01,   ///< 连接验证请求
+        typeLogonResponse  = 0x02,   ///< 连接验证响应
+
 		TYPE_LOGOFF_REQ    = 0x03,   ///< 连接断开请求
 		TYPE_LOGOFF_RES    = 0x04,   ///< 连接断开响应
 		TYPE_HEARTBEAT_REQ = 0x07,   ///< 心跳帧请求
 		TYPE_HEARTBEAT_RES = 0x08,   ///< 心跳帧响应
-		TYPE_RPC_REQ       = 0x11,   ///< RPC执行请求
-		TYPE_RPC_RES       = 0x12    ///< RPC执行响应
+
+        typeServiceRequest  = 0x11,   ///< RPC服务执行请求
+        typeServiceResponse = 0x12   ///< RPC服务执行响应
 	};
     
     /// SRPC Message Header
@@ -56,8 +58,41 @@ namespace srpc {
 	    int16_t suspend;     ///< 服务器满载后，客户端连接需要挂起的时间秒数
 	    int64_t regcode;     ///< 注册码
     } logon_reply_t;
-    
 
+#define    RPC_MAX_SERVICE_NAME_LEN  128
+
+    typedef struct srpc_service_header {
+        int64_t reg_code;
+	    int64_t session_id;
+	    int64_t tenant_id;
+	    int64_t task_create_time;  ///< 任务创建时间，单位us
+	    int32_t task_timeout;      ///< 任务总超时时间，单位毫秒
+	    int32_t result;            ///< 任务执行结果，目前仅对于rpc response有效，rpc request忽略
+	    int32_t rpc_body_len;
+	    char    compress;
+	    char    encrypt;
+	    int16_t service_name_length;
+	    char    service_name[RPC_MAX_SERVICE_NAME_LEN];  /// 服务名称最长字节数
+    } service_header_t;
+
+    typedef struct srpc_data_block
+    {
+        int32_t length;
+        char    value[0];
+    } datablock_t;
+
+    typedef struct srpc_service_request {
+        message_header_t header;
+        service_header_t service;
+        datablock_t      data[0];
+    } service_request_t;
+
+    typedef struct srpc_service_response {
+        message_header_t header;
+        service_header_t service;
+        datablock_t      data[0];
+    } service_response_t;
+    
     /// check the magic of the message.
     bool message_check_magic(const message_t * m);  
 

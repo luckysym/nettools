@@ -1,6 +1,7 @@
 #include <sym/srpc.h>
 #include <assert.h>
 #include <map>
+#include <memory.h>
 
 #define LOCAL_URL "0.0.0.0:8899"
 
@@ -27,6 +28,9 @@ public:
     void operator()(int fd, int status, io::MutableBuffer & buffer);
 
     void onMessageReceived(srpc::message_t * in, io::ConstBuffer & out);
+protected:
+    void onLogonRequestReceived(srpc::logon_request_t *in, io::ConstBuffer & out);
+    void onServiceRequestReceived(srpc::service_request_t *in, io::ConstBuffer & out);
 };
 
 class SendCallback
@@ -177,26 +181,85 @@ void RecvCallback::operator()(int fd, int status, io::MutableBuffer & buffer)
 
 void RecvCallback::onMessageReceived(srpc::message_t * in, io::ConstBuffer & out)
 {
-    int16_t logon_req = srpc::TYPE_LOGON_REQ;
-    int16_t x = io::htob(logon_req);
-    if ( in->header.body_type == x) {
+    int16_t logon_req = io::htob((int16_t)srpc::typeLogonRequest);
+    int16_t service_req = io::htob((int16_t)srpc::typeServiceRequest); 
 
-        SYM_TRACE("[trace] ON_LOGON_REQUEST_RECV");
-
-        srpc::logon_reply_t * p  = (srpc::logon_reply_t*)malloc(sizeof(srpc::logon_reply_t));
-        p->header = in->header;
-        p->header.body_type = io::htob((int16_t)srpc::TYPE_LOGON_RES);
-        p->header.timestamp = io::htob((int64_t)chrono::now());
-        p->regcode = io::htob(1);
-        p->result = 0;
-        p->suspend = 0;
-        p->window = 1;
-
-        out.attach((char *)p, sizeof(srpc::logon_reply_t), sizeof(srpc::logon_reply_t));
-        out.limit(sizeof(srpc::logon_reply_t));
-    } else {
+    if ( in->header.body_type == logon_req ) {
+        this->onLogonRequestReceived((srpc::logon_request_t*)in, out);
+    }
+    else if (in->header.body_type == service_req) {
+        this->onServiceRequestReceived((srpc::service_request_t*)in, out);
+    } 
+    else {
         abort();
     }
+}
+
+void RecvCallback::onServiceRequestReceived(srpc::service_request_t * in, io::ConstBuffer &out)
+{
+    const char * replydata = "SDS0{{0x8, \\{\"result\": \"1234567\"\\}}}";
+    srpc::service_response_t * resp = (srpc::service_response_t*)malloc(1024);
+    
+    int64_t sid = io::btoh(in->service.session_id);
+    srpc::datablock_t * session = in->data;
+    int32_t sessionlen = io::btoh(session->length);
+    std::string strsession((char *)session->value, sessionlen);
+
+    const char * p = (const char *)session;
+    p += sizeof(int32_t) + sessionlen;
+
+    srpc::datablock_t * stream = (srpc::datablock_t*)(p);
+    int32_t streamlen  = io::btoh(stream->length);
+    std::string strstream((char *)stream->value, streamlen);
+
+    SYM_TRACE_VA("ON_SERVICE_REQUEST, sid: %lld, sessionlen: %d, session: %s, streamlen: %d, stream: %s",
+        sid, sessionlen, strsession.c_str(), streamlen, strstream.c_str());
+    
+    resp->header = in->header;
+    resp->service = in->service;
+
+    resp->header.body_type = io::htob((int16_t)srpc::typeServiceResponse);
+    
+    srpc::datablock_t * osess = resp->data;
+    osess->length = session->length;
+    memcpy(osess->value, session->value, sessionlen);
+
+    srpc::datablock_t * ostream = (srpc::datablock_t * )((char *) (&osess->value) + sessionlen);
+    int32_t oslen = strlen(replydata);
+    ostream->length = io::htob(oslen);
+    memcpy(ostream->value, replydata, oslen);
+
+    int32_t svcbodylen = 2 * sizeof(int32_t) + sessionlen + oslen;
+    int32_t totallen = sizeof(srpc::message_header_t) + sizeof(srpc::service_request_t)
+                     + sessionlen + oslen + 2 * sizeof(int32_t);
+    resp->header.length = io::htob(totallen);
+    resp->service.rpc_body_len = io::htob(svcbodylen);
+
+    out.attach((const char *)resp, totallen, 1024);
+    out.limit(totallen);
+    return ;
+}
+
+void RecvCallback::onLogonRequestReceived(srpc::logon_request_t *in, io::ConstBuffer & out)
+{
+        int size = io::btoh(in->client_length) + io::btoh(in->server_length);
+        std::string str(in->body, size);
+        SYM_TRACE_VA("[trace] ON_LOGON_REQUEST_RECV, %s", str.c_str());
+
+        srpc::logon_reply_t * p  = (srpc::logon_reply_t*)malloc(sizeof(srpc::logon_reply_t));
+        
+        p->header = in->header;
+        p->header.body_type = io::htob((int16_t)srpc::typeLogonResponse);
+        p->header.timestamp = io::htob((int64_t)chrono::now());
+        p->header.length = io::htob((int32_t)sizeof(srpc::logon_reply_t));
+
+        p->regcode = io::htob(1);
+        p->result  = 0;
+        p->suspend = 0;
+        p->window  = 1;
+        
+        out.attach((char *)p, sizeof(srpc::logon_reply_t), sizeof(srpc::logon_reply_t));
+        out.limit(sizeof(srpc::logon_reply_t));
 }
 
 void RecvCallback::sendResponse(int fd, io::ConstBuffer & outbuf) 

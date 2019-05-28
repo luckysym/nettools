@@ -102,7 +102,12 @@ namespace io {
             return p;
         }
 
-        void reset()  { BufferBase::position(0), BufferBase::limit(BufferBase::capacity()); }
+        /// \brief 缓存重置，pos=0,size=0,limit=cap
+        void reset() {
+            BufferBase::position(0), 
+            BufferBase::resize(0);
+            BufferBase::limit(BufferBase::capacity()); 
+        }
     }; // end MutableBuffer
 
 } // end namespace io
