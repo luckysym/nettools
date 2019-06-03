@@ -111,6 +111,7 @@ namespace net {
         bool bind(const Address & addr, err::Error * e = nullptr);
         bool close(err::Error *e = nullptr);
         bool create(int af, int type, err::Error *e = nullptr);
+        bool connect(const Address & remote, err::Error * e = nullptr);
         int  fd() const  { return m_fd; }
         bool listen(err::Error * e = nullptr);
         int  receive(char * buf, int len, err::Error * e = nullptr);
@@ -199,6 +200,24 @@ namespace net
         // error handler
         if (e)  *e = err::Error(errno, err::dmSystem);
         return false;
+    }
+
+    inline 
+    bool Socket::connect(const Address & remote, err::Error * e)
+    {
+        while (1) {
+            int r = ::connect(m_fd, remote.data(), remote.size());
+            if ( r == 0 ) return true;
+            
+            // r == -1
+            int eno = errno;
+            if ( eno == EINTR ) continue;
+            else if ( eno == EINPROGRESS ) return true;
+            else {
+                if ( e ) *e = err::Error(eno, err::dmSystem);
+                return false;
+            }
+        }
     }
 
     inline 
