@@ -1,84 +1,53 @@
 #include <sym/nio.h>
 #include <sym/network.h>
 #include <sym/io.h>
+#include <sym/redis.h>
 
 volatile int G_stop = 0;
 
 int G_seq = 0;
 
-void redis_channel_callback(nio::channel_t *ch, int event, void *io, void *arg) { 
-    bool isok;
-    err::error_t err;
-    err::init_error_info(&err);
-
-    if ( event == nio::channel_event_connected ) {
-        fprintf(stderr, "connected \n");
-        const char *cmd = "set abc 123456\r\n";
-        isok = nio::channel_sendn_async(ch, cmd, strlen(cmd), -1, &err);
-        assert(isok);
-    } 
-    else if ( event == nio::channel_event_sent ) {
-        char * buf = (char *)malloc(128);
-        isok = nio::channel_recvsome_async(ch, buf, 128, -1, &err);
-        assert(isok);
-    } 
-    else if ( event == nio::channel_event_received ) {
-        io::buffer_t * buf = (io::buffer_t*)io;
-        assert(buf);
-        fprintf(stderr, "%s", buf->data);
-        free(buf->data);
-        G_seq += 1;
-        if ( G_seq == 1) {
-            const char *cmd = "get abc\r\n";
-            isok = nio::channel_sendn_async(ch, cmd, strlen(cmd), -1, &err);
-            assert(isok);
-        } else {
-            G_stop = 1;
-            nio::selector_wakeup(ch->sel, &err);
-        }
-    }
-    else {
-        assert("redis_channel_callback" == nullptr);
-    }
+int on_send(const char * cmd, int len, int timeout, err::Error *e)
+{
+    SYM_TRACE_VA("on send: %d", len);
+    return len;    
 }
+
+int on_recv(char * cmd, int len, int timeout, err::Error *e)
+{
+    SYM_TRACE_VA("on recv: %d", len);
+    strcpy(cmd, "+OK\r\n");
+    return strlen(cmd);    
+}
+
 
 int main(int argc, char **argv)
 {
-    using namespace nio;
-
-    bool isok;
+    err::Error e;
+    net::Address remote("127.0.0.1", 6379, &e);
+    if ( e ) {
+        SYM_TRACE_VA("init remote addr error, %s", e.message());
+        return -1;
+    }
     
-    if ( argc < 2 ) {
-        fprintf(stderr, "usage: %s <url>\n", argv[0]);
+    nio::SocketChannel channel;
+    bool isok = channel.open(remote, 5000, &e);
+    if ( !isok ) {
+        SYM_TRACE_VA("channel open error, %s", e.message());
         return -1;
     }
 
-    net::location_t remote;
-    net::location_init(&remote);
+    SYM_TRACE("channel open ok");
 
-    auto p = net::location_from_url(&remote, argv[1]);
-    assert(p);
+    redis::Value result;
+    redis::Command command(on_send, on_recv);
+    command.setText("set a 100");
+    command.execute(&result, 1000, &e);
     
-    fprintf(stderr, "location: %s %s:%d\n", remote.proto, remote.host, remote.port);
+    SYM_TRACE_VA("command result: %s", result.getString().c_str() );
+    sleep(30);
 
-    nio::selector_t selector;
-    isok = nio::selector_init(&selector, 0, nullptr);
-    assert(isok);
+    channel.close();
 
-    channel_t ch;
-    isok = channel_init(&ch, &selector, redis_channel_callback, nullptr, nullptr);
-    assert(isok);
-
-    isok = channel_open_async(&ch, &remote, nullptr);
-    assert(isok);
-
-    while ( !G_stop ) {
-        isok = nio::selector_run(&selector, nullptr);
-        assert(isok);
-    }
-    
-    channel_shutdown(&ch, channel_shut_both, nullptr);
-    channel_close(&ch, nullptr);
-    
     return 0;
 }
