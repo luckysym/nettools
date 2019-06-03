@@ -42,6 +42,18 @@ namespace net {
         std::string m_port;
         std::string m_path;
         std::string m_query;
+
+        void clear() {
+            m_schema.clear();
+            m_user.clear();
+            m_password.clear();
+            m_host.clear();
+            m_port.clear();
+            m_path.clear();
+            m_query.clear();
+        }
+
+        std::string  toString() const;
     }; // end class URL
 
     /// \brief URL解析器
@@ -436,5 +448,29 @@ namespace net
         }
         return nullptr;
     }
+
+    std::string  URL::toString() const {
+            std::string str;
+            str.reserve(1024);
+            if ( !m_schema.empty() ) str.append(m_schema).append("://");
+            if ( !m_host.empty() ) {
+                if ( !m_user.empty() ) {
+                    str.append(m_user);
+                    if ( !m_password.empty() ) str.append(1, ':').append(m_password);
+                    str.append(1, '@');
+                }
+                str.append(m_host);
+                if ( !m_port.empty() ) str.append(1, ':').append(m_port);
+            }
+            if ( !m_path.empty() ) {
+                if ( m_path[0] != '/') str.append(1, '/');
+                str.append(m_path);
+            }
+            if ( !m_query.empty() ) {
+                if ( m_path.empty() ) str.append(1, '/');
+                str.append(m_query);
+            }
+            return str;
+        }
 
 } // end namespace net
