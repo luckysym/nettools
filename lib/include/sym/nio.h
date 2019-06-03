@@ -143,9 +143,11 @@ namespace nio
 
 namespace nio 
 {
+    /// IO对象基础类。子类包括SocketChannel和SocketListener。
     class IoBase {
     private:
         EnumIoType m_type;
+
     public:
         IoBase( EnumIoType type ) : m_type(type) {}
 
@@ -162,10 +164,12 @@ namespace nio
         OutputBufferQueue m_outputBuffers;
 
     public:
+        SocketChannel() : IoBase(EnumIoType::ioSocketChannel)  {}
         SocketChannel(int fd) : IoBase(EnumIoType::ioSocketChannel), m_sock(fd) {}
         ~SocketChannel() { if (m_sock.fd() >= 0) m_sock.close(); }
 
         int  fd() const { return m_sock.fd(); }
+        bool open(const net::Address & remote, int timeout, err::Error * e = nullptr);
         bool close(err::Error * e = nullptr);
 
         /// 执行一次recv操作，无论是否收到数据。收到的数据写入队列缓存。
@@ -686,6 +690,29 @@ namespace nio
     {
         m_shutFlags = net::shutdownBoth;
         return m_sock.close(e);
+    }
+
+    inline
+    bool SocketChannel::open(const net::Address & remote, int timeout, err::Error * e)
+    {
+        assert(m_sock.fd() == -1);
+        bool isok = m_sock.create(remote.af(), SOCK_STREAM|SOCK_NONBLOCK|SOCK_CLOEXEC, e);
+        if ( !isok ) return false;
+
+        isok = m_sock.connect(remote, e);
+        if (!isok ) {
+            m_sock.close();
+            return false;
+        }
+
+        int r = this->wait(selectWrite, timeout, e);
+        if ( r > 0 ) {
+            return true;
+        } else {
+            // wait error
+            m_sock.close();
+            return false;
+        }
     }
     
     inline 
