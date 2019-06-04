@@ -10,52 +10,104 @@ namespace redis
 {
     class Value 
     {
+    public:
+        enum {
+            vtNull,
+            vtStatus,
+            vtString,
+            vtInteger,
+            vtList
+        };
+
+        using ValueList = std::vector<Value>;
     private:
+        int         m_type { vtNull };
         bool        m_status;
         std::string m_str;
+        int64_t     m_nval;
+        ValueList   m_list;
+        
     public:
         bool status() const { return m_status; }
-        void status(bool status) { m_status = status; }
+
+        void setStatus(bool status, const char *msg, int len) 
+        {
+            m_type =  vtStatus ;
+            m_status = status;
+            m_str.assign(msg, len); 
+        }
+
+        int  type() const { return m_type; }
+
+        void setType(int type) { m_type = type; } 
+
+        void setNull() { m_type == vtNull; }
 
         void setString(const char * data, int len) {
+            m_type = vtString;
             m_str.assign(data, len);
         }
 
+        void setInt(int64_t val) { 
+            m_type = vtInteger;
+            m_nval = val; 
+        }
+
         std::string getString() const { return m_str; }
+
+        int64_t getInt() const { return m_nval; }
+
+        ValueList & list() { return m_list; }
+
+        void reset() {
+            m_type = vtNull;
+            m_str.clear();
+            m_status = true;
+        }
     }; // end class Value
+
+    using SendHandler = std::function<int (const char * cmd, int len, int timeout, err::Error * e)>;
+    using RecvHandler = std::function<int (char * buf, int len, int timeout, err::Error *e)>;
 
     class ValueDecoder
     {
     private:
         static const int stateInit   = 0;
         static const int stateFinish = 1;
-        static const int stateStatus = 2;  // 解析完状态（+, -）
-    private:
-        int m_state;
-        Value * m_val;
-    public:
-        int  parse(const char * buf, int len, err::Error *e = nullptr);
+        static const int stateArray  = 2;
 
-        bool finished() const { return m_state == stateFinish; }
-        void reset(Value * value) {
-            m_state = stateInit;
-            m_val = value;
-        }
+        struct ValueItem {
+            int type;
+        };
+
+    private:
+        RecvHandler            m_rh;
+        std::vector<char>      m_buf;
+        int                    m_len;   // m_buf中收到的有效数据总长
+        int                    m_pos;   // m_buf中当前解析位置
+
+    public:
+        ValueDecoder(RecvHandler rh) : m_rh(rh) {}
+
+        int  parse(Value * value, int timeout, err::Error *e = nullptr);
+        int  receiveData(int timeout, err::Error *e = nullptr);
+
+    private:
+        int parseStatus(Value * value, int timeout, err::Error * e = nullptr);
+        int parseInteger(Value * value, int timeout, err::Error * e = nullptr);
+        int parseBulkStrings(Value * value, int timeout, err::Error * e = nullptr);
+        int parseArray(Value * value, int timeout, err::Error * e = nullptr);
     }; // end class ValueDecoder
 
     class Command 
     {
-    public:
-        using OnSend = std::function<int (const char * cmd, int len, int timeout, err::Error * e)>;
-        using OnRecv = std::function<int (char * buf, int len, int timeout, err::Error *e)>;
-
     private:
         std::vector<char> m_buf;
-        OnSend            m_sh;
-        OnRecv            m_rh;
+        SendHandler       m_sh;
+        RecvHandler       m_rh;
         
     public:
-        Command(OnSend sh, OnRecv rh ) : m_sh(sh), m_rh(rh) {}
+        Command(SendHandler sh, RecvHandler rh ) : m_sh(sh), m_rh(rh) {}
 
         bool execute(Value * value, int timeout, err::Error *e = nullptr);
         void setText(const char * text);
@@ -78,64 +130,199 @@ namespace redis
         int r = m_sh(&m_buf[0], (int)m_buf.size(), timeout, e);
         if ( r != (int)m_buf.size() ) return false;
 
-# define  RDS_BUF_SIZE 128
-        char buf[RDS_BUF_SIZE];
-        int  len = 0;
+        int  len = 0;   // 收到的长度
+        int  pos = 0;   // 每次解析位置
         
         // 接收回复数据并解码到value中
-        ValueDecoder decoder;
-        decoder.reset(value);
-        while (1) {
-            int r = m_rh(buf + len, RDS_BUF_SIZE - len, timeout, e);
-            if ( r < 0 ) return false; 
-
-            len += r;
-            int c = decoder.parse(buf, len, e);
-            if ( c < 0 ) return false;
-
-            if ( decoder.finished() ) return true;
-            SYM_TRACE_VA("--- %d  %d", r, c);
-            
-            if ( c > 0 ) {
-                len -= c;
-                memmove(buf, buf + c, len);
-            }
-            
-        }
+        ValueDecoder decoder(m_rh);
+        return decoder.parse(value, timeout, e);
     }
 
-    int ValueDecoder::parse(const char * buf, int len, err::Error *e)
+    int ValueDecoder::receiveData(int timeout, err::Error * e)
     {
-        int pos = 0;
-        while ( pos < len && m_state != stateFinish)
-        {
-            SYM_TRACE_VA("pos = %d. state = %d", pos, m_state);
-            if ( m_state == stateInit) {
-                if ( buf[0] == '+' ) m_val->status(true);
-                else if ( buf[0] == '-') m_val->status(false);
-                else {
-                    SYM_TRACE_VA("*** ERROR status sign: %c", buf[0]);
-                    if ( e ) *e = err::Error(-1, "bad status sign");
+        if ( m_len == m_buf.size() ) m_buf.resize(m_buf.size() * 2);
+        int r = m_rh(&m_buf[m_len], (int)m_buf.size() - m_len, timeout, e);
+        if ( r > 0 ) m_len += r;
+        return r;
+    }
+
+    int ValueDecoder::parse(Value * value, int timeout, err::Error * e)
+    {
+        if ( m_buf.size() < 128) m_buf.resize(128);
+        m_pos = 0;
+        m_len = 0;
+
+        // 循环收消息，直到收到至少一个字符，或者异常退出
+        while ( m_len < 1 ) {
+            int n = m_rh(&m_buf[m_len], (int)m_buf.size() - m_len, timeout, e);
+            if ( n < 0 ) return -1;   // 异常退出
+            m_len += n;
+        }
+        SYM_TRACE_VA("+++ type: %c", m_buf[0]);
+        if ( m_buf[0] == '+' || m_buf[0] == '-')
+            return this->parseStatus(value, timeout, e);
+        else if ( m_buf[0] == '$') 
+            return this->parseBulkStrings(value, timeout, e);
+        else if ( m_buf[0] == ':')
+            return this->parseInteger(value, timeout, e);
+        else if ( m_buf[0] == '*')
+            return this->parseArray(value, timeout, e);
+        else {
+            if ( e ) {
+                char err[64];
+                snprintf(err, 64, "first char error %c", m_buf[0]);
+                *e = err::Error(-1, "first char error");
+            }
+            return -1;
+        }
+
+        return 0;
+    }
+
+    int ValueDecoder::parseStatus(Value * value, int timeout, err::Error * e)
+    {
+        bool status = false;
+        if ( m_buf[m_pos] == '+' ) status = true;
+        m_pos += 1;
+
+        int end = m_pos;
+
+        while (1) {
+            SYM_TRACE_VA("parseStatus while %d", end);
+            for(; end < m_len && m_buf[end] != '\n'; ++end) ;
+            if ( end < m_len ) break; 
+
+            if ( m_len == m_buf.size() ) m_buf.resize(m_buf.size() * 2);
+            int r = m_rh(&m_buf[m_len], (int)m_buf.size() - m_len, timeout, e);
+            if ( r < 0 ) return -1;   // 异常退出
+            m_len += r;
+        }
+        
+        value->setStatus(status, &m_buf[m_pos], end - m_pos - 1);
+        return end + 1;
+    }
+
+    int ValueDecoder::parseInteger(Value * value, int timeout, err::Error * e)
+    {
+        assert(m_buf[m_pos] == ':');
+        m_pos += 1;
+        
+        int end = m_pos;
+        while (1) {
+            for( ; end < m_len && m_buf[end] != '\n'; ++end) ;
+            if ( end < m_len ) break;
+            
+            int r = this->receiveData(timeout, e);
+            if ( r < 0 ) return -1;   // 异常退出
+        }
+        
+        int64_t n = atoll(&m_buf[m_pos]);
+        value->setInt(n);
+        return end + 1;
+    }
+
+    int ValueDecoder::parseBulkStrings(Value * value, int timeout, err::Error * e)
+    {
+        assert(m_buf[m_pos] == '$');
+        m_pos += 1;
+        int end = m_pos;
+
+        // 读size部分
+        while (1) {
+            for( ; end < m_len && m_buf[end] != '\n'; ++end) ;
+            if ( end < m_len ) break;
+            
+            int r = this->receiveData(timeout, e);
+            if (r < 0 ) return -1;
+        }
+
+        int size = atoi(&m_buf[ m_pos ]);   // 获取到长度。
+        if ( size < 0 ) {
+            value->setNull();
+            return end + 1;
+        }
+
+        // 读字符串
+        m_pos = end + 1;
+
+        while (1) {
+            if ( m_len >= m_pos + size + 2 ) {
+                if (m_buf[m_pos + size + 1] == '\n') {
+                    break;
+                } else {
+                    if ( e )  *e  = err::Error(-1, "bad bulk string format");
                     return -1;
                 }
-                m_state = stateStatus;
             }
-            else if ( m_state == stateStatus ) {
-                SYM_TRACE_VA("---  %d", pos);
-                int i = pos;
-                for ( ; i < len && buf[i] != '\n'; ++i )  ;
-                if ( buf[i] == '\n') {
-                    m_val->setString(buf + pos, i - pos - 1); // 去掉\r
-                    pos = i;
-                    m_state = stateFinish;
-                    SYM_TRACE_VA("state finished = %d", pos);
-                } else {
-                    SYM_TRACE_VA("return pos1 = %d", pos);
-                    return pos;  // 返回已经解析到的位置
+
+            int r = this->receiveData(timeout, e);
+            if (r < 0 ) return -1;
+        }
+        
+        value->setString(&m_buf[m_pos], size);
+        return m_pos + size + 2;
+    }
+
+    int ValueDecoder::parseArray(Value * value, int timeout, err::Error * e)
+    {
+        assert(m_buf[m_pos] == '*');
+        m_pos += 1;
+        int end = m_pos;
+        value->setType(Value::vtList);
+
+        // array length
+        while (1) {
+            for( ; end < m_len && m_buf[end] != '\n'; ++end) ;
+            if ( end < m_len ) break;
+            
+            int r = this->receiveData(timeout, e);
+            if ( r < 0 ) return -1;   // 异常退出
+        }
+
+        int n = atoi( &m_buf[m_pos]);
+        if ( n < 0 ) {
+            value->setNull();
+            return end + 1;
+        }
+        m_pos = end + 1;
+
+        for ( int i = 0; i < n; ++i ) {
+            while ( m_pos >= m_len ) {
+                int r = this->receiveData(timeout, e);
+                if ( r < 0 ) return -1;
+            }
+
+            Value value1;
+            if ( m_buf[m_pos] == '+' || m_buf[m_pos] == '-') {
+                int r = this->parseStatus(&value1, timeout, e);
+                if ( r < 0  )  return -1;
+                m_pos = r;
+            } 
+            else if ( m_buf[m_pos] == '$') {
+                int r = this->parseBulkStrings(&value1, timeout, e);
+                if ( r < 0 ) return -1;
+                m_pos = r;
+            }
+            else if ( m_buf[m_pos] == ':') {
+                int r = this->parseInteger(&value1, timeout, e);
+                if ( r < 0 ) return -1;
+                m_pos = r;
+            }
+            else if ( m_buf[m_pos] == '*') {
+                int r = this->parseArray(&value1, timeout, e);
+                if ( r < 0 ) return -1;
+                m_pos = r;
+            }
+            else {
+                if ( e ) {
+                    char err[64];
+                    snprintf(err, 64, "first char error %c", m_buf[m_pos]);
+                    *e = err::Error(-1, "first char error");
                 }
+                return -1;
             }
-            ++pos;
-        } // end while
-        return pos;
+            value->list().push_back(value1);
+        }
+        return m_pos;
     }
 } // end namespace redis
