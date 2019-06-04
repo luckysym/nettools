@@ -86,8 +86,9 @@ int main(int argc, char **argv)
 
     redis::Value result;
     redis::Command command(on_send, on_recv);
+    command.setTimeout(1000);
     command.setText("set a 100");
-    command.execute(&result, 1000, &e);
+    command.execute(&result, &e);
     
     printf("type of result: %d\n", result.type());
     print_redis_value(&result);

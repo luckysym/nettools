@@ -105,13 +105,14 @@ namespace redis
         std::vector<char> m_buf;
         SendHandler       m_sh;
         RecvHandler       m_rh;
-        
+        int               m_timeout;
+
     public:
         Command(SendHandler sh, RecvHandler rh ) : m_sh(sh), m_rh(rh) {}
 
-        bool execute(Value * value, int timeout, err::Error *e = nullptr);
+        bool execute(Value * value, err::Error *e = nullptr);
         void setText(const char * text);
-        
+        void setTimeout(int timeout) { m_timeout = timeout; };
     }; // end class Command
 
     void Command::setText(const char * text) 
@@ -125,9 +126,9 @@ namespace redis
         }
     }
 
-    bool Command::execute(Value * value, int timeout, err::Error * e ) 
+    bool Command::execute(Value * value, err::Error * e ) 
     {
-        int r = m_sh(&m_buf[0], (int)m_buf.size(), timeout, e);
+        int r = m_sh(&m_buf[0], (int)m_buf.size(), m_timeout, e);
         if ( r != (int)m_buf.size() ) return false;
 
         int  len = 0;   // 收到的长度
@@ -135,7 +136,7 @@ namespace redis
         
         // 接收回复数据并解码到value中
         ValueDecoder decoder(m_rh);
-        return decoder.parse(value, timeout, e);
+        return decoder.parse(value, m_timeout, e);
     }
 
     int ValueDecoder::receiveData(int timeout, err::Error * e)
