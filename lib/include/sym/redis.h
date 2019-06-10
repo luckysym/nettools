@@ -5,7 +5,6 @@
 #include <functional>
 #include <sym/error.h>
 
-
 namespace redis
 {
     class Value 
@@ -103,31 +102,94 @@ namespace redis
     {
     private:
         std::vector<char> m_buf;
+        std::vector<std::string> m_args;
         SendHandler       m_sh;
         RecvHandler       m_rh;
         int               m_timeout;
 
     public:
-        Command(SendHandler sh, RecvHandler rh ) : m_sh(sh), m_rh(rh) {}
+        Command(SendHandler sh, RecvHandler rh) : m_sh(sh), m_rh(rh) {}
 
+        Command & operator<<(const char * str) { return this->append(str); }
+
+        Command & assign(const char * str);
+        Command & append(const char * str);
+        
         bool execute(Value * value, err::Error *e = nullptr);
-        void setText(const char * text);
+        bool execute(Value * value, const char * text, err::Error *e = nullptr);
+        
         void setTimeout(int timeout) { m_timeout = timeout; };
+
+        /// 重置当前命令，删除之前的命令缓存
+        void reset() { m_buf.resize(0); m_args.resize(0); }
     }; // end class Command
 
-    void Command::setText(const char * text) 
+    Command & Command::assign(const char * str) 
+    {
+        m_buf.resize(0);
+        m_args.resize(0);
+
+        int len1 = str?strlen(str):0;
+        if( m_args.capacity() == m_args.size() ) m_args.reserve(m_args.capacity() + 8);
+        m_args.push_back(std::string(str, len1));
+        return *this;
+    }
+
+    Command & Command::append(const char * str) {
+        int len1 = str?strlen(str):0;
+        if( m_args.capacity() == m_args.size() ) m_args.reserve(m_args.capacity() + 8);
+        m_args.push_back(std::string(str, len1));
+        return *this;
+    }
+
+    bool Command::execute(Value * value, const char * text, err::Error * e) 
     {
         if ( text ) {
             int len = strlen(text);
-            m_buf.resize( len );
-            memcpy(&m_buf[0], text, len);
+            if ( len >= 2 && text[len - 1] == '\n' && text[len - 2] == '\r') {
+                m_buf.resize( len );
+                memcpy(&m_buf[0], text, len);
+            } else {
+                m_buf.resize(len + 2);
+                memcpy(&m_buf[0], text, len);
+                m_buf[len] = '\r';
+                m_buf[len + 1] = '\n';
+            }
         } else {
             m_buf.resize(0);
         }
+
+        return this->execute(value, e);
     }
 
     bool Command::execute(Value * value, err::Error * e ) 
     {
+        if ( m_buf.empty() ) {
+            int total_len = 0;
+            for ( auto it = m_args.begin(); it != m_args.end(); ++it) {
+                total_len +=it->length();
+            }
+            total_len += m_args.size() * 32;
+            m_buf.resize(total_len);
+
+            int pos = 0;
+            int remain = total_len;
+            int r = snprintf(&m_buf[pos], remain, "*%d\r\n", (int)m_args.size());
+            pos += r; remain -= r;
+
+            for ( auto it = m_args.begin(); it != m_args.end(); ++it) {
+                int len = it->length();
+                r = snprintf(&m_buf[pos], remain, "$%d\r\n", len);
+                pos += r; remain -= r;
+                memcpy(&m_buf[pos], it->data(), len);
+                pos += len; remain -= len;
+                m_buf[pos] = '\r';
+                m_buf[pos + 1] = '\n';
+                pos += 2; remain -= 2;
+            } 
+            m_buf.resize( total_len - remain );  // 去掉多分配的
+        }
+
         int r = m_sh(&m_buf[0], (int)m_buf.size(), m_timeout, e);
         if ( r != (int)m_buf.size() ) return false;
 

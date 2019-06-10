@@ -178,7 +178,7 @@ namespace nio
         /// 执行一次或多次recv操作，直到收到Limit大小的数据，或者超时。
         int  receiveN(io::MutableBuffer & buffer, int timeout, err::Error * e = nullptr);
 
-        /// 执行一次或多次recv操作，直到受收到任意数量的字节(>0)，或者超时。
+        /// 执行一次或多次recv操作，直到受收到任意数量的字节(>0)，或者接收失败或超时。
         int  receiveSome(io::MutableBuffer & buffer, int timeout, err::Error * e = nullptr);
         
         /// 对当前发送队列缓存执行一次send操作，无论是否有数据发送出去都将返回。

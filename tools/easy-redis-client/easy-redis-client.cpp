@@ -7,42 +7,25 @@ volatile int G_stop = 0;
 
 int G_seq = 0;
 
+nio::SocketChannel * G_channel = nullptr;
+
 int on_send(const char * cmd, int len, int timeout, err::Error *e)
 {
-    SYM_TRACE_VA("on send: %d", len);
-    return len;    
+    nio::SocketChannel * channel = G_channel;
+
+    io::ConstBuffer buffer(cmd, len, len);
+    int r = channel->sendN(buffer, timeout, e);
+    SYM_TRACE_VA("on send: %d, %s", r, cmd);
+    return r;
 }
 
 int on_recv(char * cmd, int len, int timeout, err::Error *e)
 {
-    static int i = 0;
-    SYM_TRACE_VA("on recv: %d", len);
-    // strcpy(cmd, "+OK\r\n");
-    // strcpy(cmd, "-Error message\r\n");
-    /*
-    if ( i == 0 ) {
-        strcpy(cmd, "-Error ");
-        i = 1;
-    } else {
-        strcpy(cmd, "Message\r\n");
-    }
-    */
-    
-    // strcpy(cmd, ":1234567890\r\n");
-    // strcpy(cmd, "$10\r\n123456\r\n78\r\n");
-    // strcpy(cmd, "*-1\r\n");
-    // strcpy(cmd, "*1\r\n+OK\r\n");
-    // strcpy(cmd, "*2\r\n+OK\r\n:987654321\r\n");
-    strcpy(cmd, "*5\r\n"
-                  "+OK\r\n"
-                  ":987654321\r\n"
-                  "$5\r\nhello\r\n"
-                  "*2\r\n"
-                    "$6\r\nworld!\r\n"
-                    ":55667788\r\n"
-                  "$-1\r\n");
-
-    return strlen(cmd);
+    io::MutableBuffer buffer(cmd, 0, len);
+    nio::SocketChannel * channel = G_channel;
+    int r = channel->receiveSome(buffer, timeout);
+    SYM_TRACE_VA("on recv: %d", r);
+    return r;
 }
 
 void print_redis_value(redis::Value * value)
@@ -81,17 +64,23 @@ int main(int argc, char **argv)
         SYM_TRACE_VA("channel open error, %s", e.message());
         return -1;
     }
+    G_channel = &channel;
 
     SYM_TRACE("channel open ok");
 
     redis::Value result;
     redis::Command command(on_send, on_recv);
     command.setTimeout(1000);
-    command.setText("set a 100");
-    command.execute(&result, &e);
+    command.execute(&result, "set a abcd", &e);
     
     printf("type of result: %d\n", result.type());
     print_redis_value(&result);
+    
+    command.assign("get").append("a");
+    command.execute(&result, &e);
+    printf("type of result: %d\n", result.type());
+    print_redis_value(&result);
+
     sleep(1);
 
     channel.close();
