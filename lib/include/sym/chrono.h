@@ -6,7 +6,8 @@
 /// 包含时钟相关操作的名称空间。
 namespace chrono
 {
-    int64_t now();
+    ///< 获取并返回当前微秒级时间戳。
+    int64_t now();   
 }
 
 inline

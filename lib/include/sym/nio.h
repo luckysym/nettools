@@ -2,7 +2,6 @@
 
 #include <sym/error.h>
 #include <sym/chrono.h>
-#include <sym/algorithm.h>
 #include <sym/thread.h>
 #include <sym/network.h>
 #include <sym/io.h>

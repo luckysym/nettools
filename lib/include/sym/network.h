@@ -1,6 +1,5 @@
 #pragma once
 
-#include <sym/algorithm.h>
 #include <sym/error.h>
 #include <sym/chrono.h>
 
