@@ -8,6 +8,10 @@
 #include <string>
 #include <list>
 
+#include <sym/symdef.h>
+
+BEGIN_SYM_NAMESPACE
+
 /// 包含异常错误以及过程跟踪相关数据结构和操作的名称空间。
 namespace err {
 
@@ -101,3 +105,5 @@ void err::trace_stderr(const char * file, int line, const char * format, ...)
 
     printf("\n");
 }
+
+END_SYM_NAMESPACE

@@ -1,9 +1,12 @@
+
 #include <sym/srpc.h>
+#include <sym/utilities.h>
 #include <assert.h>
 #include <map>
 #include <memory.h>
 
 #define LOCAL_URL "0.0.0.0:8899"
+using namespace sym;
 
 class ListenerCallback
 {

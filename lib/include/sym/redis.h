@@ -5,6 +5,10 @@
 #include <functional>
 #include <sym/error.h>
 
+# include <sym/symdef.h>
+
+BEGIN_SYM_NAMESPACE 
+
 namespace redis
 {
     class Value 
@@ -389,3 +393,5 @@ namespace redis
         return m_pos;
     }
 } // end namespace redis
+
+END_SYM_NAMESPACE 

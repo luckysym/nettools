@@ -61,6 +61,15 @@ namespace util
             return p;
         }
 
+        void destroy() {
+            if ( m_begin ) {
+                m_alloc.destroy(m_begin, m_size);
+                m_alloc.deallocate(m_begin, m_size);
+                m_size = 0;
+                m_begin = nullptr;
+            }
+        }
+
     }; // end struct ArrayImpl 
 
 } // end namespace util

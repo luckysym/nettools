@@ -4,7 +4,8 @@
 # include <sym/utilities/allocator.h>
 # include <sym/utilities/impl/array_impl.h>
 
-#include <initializer_list>
+# include <algorithm>
+# include <initializer_list>
 
 BEGIN_SYM_NAMESPACE
 
@@ -46,6 +47,9 @@ namespace util
         Array<T, Alloc> & operator=(Array<T, Alloc> && other);
         const T & operator[](size_t n) const;
         T & operator[](size_t n);
+
+        T * data() { return m_impl.m_begin; }
+        const T * data() const { return m_impl.m_begin; }
 
         size_t size() const { return m_impl.m_size; }
         T * detach() { return m_impl.detach(); }

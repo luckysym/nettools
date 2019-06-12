@@ -4,6 +4,10 @@
 #include <assert.h>
 #include <memory.h>
 
+# include <sym/symdef.h>
+
+BEGIN_SYM_NAMESPACE
+
 /// 包含基本IO操作和数据结构的名称空间。
 namespace io {
 
@@ -223,3 +227,5 @@ int16_t io::htob(int16_t n) {
     return r;
 # endif
 }
+
+END_SYM_NAMESPACE

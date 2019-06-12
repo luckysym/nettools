@@ -1,5 +1,6 @@
 #pragma once 
 
+#include <sym/symdef.h>
 #include <sym/error.h>
 #include <sym/chrono.h>
 #include <sym/thread.h>
@@ -18,6 +19,8 @@
 #include <memory>
 #include <queue>
 #include <unordered_map>
+
+BEGIN_SYM_NAMESPACE
 
 /// 包含同步非阻塞IO相关操作的名称空间。
 namespace nio
@@ -1093,3 +1096,6 @@ namespace nio
     }
 
 } // end namespace nio
+
+
+END_SYM_NAMESPACE

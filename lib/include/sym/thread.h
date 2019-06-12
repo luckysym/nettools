@@ -1,6 +1,9 @@
 #pragma once 
 
 #include <pthread.h>
+#include <sym/symdef.h>
+
+BEGIN_SYM_NAMESPACE
 
 /// 多线程相关操作的名称空间。 
 namespace mt {
@@ -63,3 +66,5 @@ bool mutex_unlock(mutex_t *m, err::Error *e ) {
 }
 
 } // end namespace mt
+
+END_SYM_NAMESPACE

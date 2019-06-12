@@ -3,6 +3,8 @@
 #include <sym/nio.h>
 #include <sym/network.h>
 
+BEGIN_SYM_NAMESPACE
+
 namespace srpc {
     
     /// SRPC Magic Word
@@ -107,3 +109,5 @@ namespace srpc {
     }
 
 } // end namespace srpc 
+
+END_SYM_NAMESPACE

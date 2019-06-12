@@ -1,22 +1,16 @@
-#include <sym/srpc.h>
-#include <assert.h>
+
+# include <sym/utilities.h>
+# include <assert.h>
 
 #define REMOTE_URL "127.0.0.1:40001"
 
 int main( int argc, char **argv)
 {
-    using namespace srpc;
+    sym::util::Array<char> array(64);
+    
+    for( int i =0; i < 16; ++i) array[i] = i;
 
-    SRPC_SyncConnection connect;
-
-    const char * remote = REMOTE_URL;
-    if ( argc > 1 ) remote = argv[1];
-
-    bool isok = connect.open(remote);
-    assert(isok);
-
-    isok = connect.close();
-    assert(isok);
+    for( int i =0; i < 16; ++i) assert(array[i] == i);
     return 0;
 }
 
