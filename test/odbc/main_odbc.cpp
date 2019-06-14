@@ -66,6 +66,24 @@ int main(int argc, char **argv)
         return -1;
     }
 
+    // 执行一条参数化插入语句
+    sqltext1 = "insert into test1 (id) values ( ? )";
+    isok = stmt1.prepare(sqltext1, &err);
+    if ( !isok ) {
+        cout<<__FILE__<<':'<<__LINE__<<' '<<err.str()<<endl;
+        return -1;
+    }
+    db::SQLStringParameter param1("world");
+    isok = param1.bind(&stmt1, 1, &err);
+    if ( !isok ) {
+        cout<<__FILE__<<':'<<__LINE__<<' '<<err.str()<<endl;
+        return -1;
+    }
+    isok = stmt1.execute(&err);
+    if ( !isok ) {
+        cout<<__FILE__<<':'<<__LINE__<<' '<<err.str()<<endl;
+        return -1;
+    }
 
 
     // 关闭连接
