@@ -96,6 +96,7 @@ namespace odbc
 
         bool init(SQLEnvironment * env, SQLError * e);
         bool open(const char * connstr, const char *user, const char * pwd, SQLError *e);
+        bool close(SQLError *e);
     }; // end classs SQLConnection
 
 } // end namespace
@@ -170,7 +171,13 @@ namespace odbc {
         SQLRETURN r = SQLConnect(
             this->handle(), (SQLCHAR*)dsn, SQL_NTS, (SQLCHAR*)user, SQL_NTS, (SQLCHAR*)pwd, SQL_NTS);
 
-        return SYM_ODBC_MAKE_RETURN("SQL_CONNECT", r, e, SQL_HANDLE_DBC, this->handle());
+        return SYM_ODBC_MAKE_RETURN("SQLConnect", r, e, SQL_HANDLE_DBC, this->handle());
+    }
+
+    bool SQLConnection::close(SQLError * e) 
+    {
+        SQLRETURN r = SQLDisconnect(this->handle());
+        return SYM_ODBC_MAKE_RETURN("SQLDisconnect", r, e, SQL_HANDLE_DBC, this->handle());
     }
 
 } // end namespace odbc
