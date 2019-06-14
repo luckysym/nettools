@@ -117,28 +117,33 @@ namespace odbc
 
 namespace odbc {
 
+    SYM_INLINE
     SQLStatement::SQLStatement(SQLConnection * conn, SQLError * e)
     {
         this->init(conn, e);
     }
 
+    SYM_INLINE
     bool SQLStatement::init(SQLConnection *conn, SQLError *e)
     {
         return this->SQLHandle::init(SQL_HANDLE_STMT, conn->handle(), SQL_HANDLE_DBC, e);
     }
 
+    SYM_INLINE
     bool SQLStatement::exec(const char * sql, SQLError * e) 
     {
         SQLRETURN r = SQLExecDirect(this->handle(), (SQLCHAR*)sql, SQL_NTS);
         return SYM_ODBC_MAKE_RETURN("SQLExecDirect", r, e, SQL_HANDLE_STMT, this->handle());
     }
 
+    SYM_INLINE
     bool SQLStatement::prepare(const char * sql, SQLError * e)
     {
         SQLRETURN r = SQLPrepare(this->handle(), (SQLCHAR*)sql, SQL_NTS);
         return SYM_ODBC_MAKE_RETURN("SQLPrepare", r, e, SQL_HANDLE_STMT, this->handle());
     }
 
+    SYM_INLINE
     bool SQLStatement::execute(SQLError * e)
     {
         SQLRETURN r = SQLExecute(this->handle() );
@@ -148,10 +153,12 @@ namespace odbc {
 
 namespace odbc {
 
+    SYM_INLINE
     SQLError::SQLError(const char * func, int rc, int ec, const char * state, const char * text)
         : m_rcode(rc), m_ecode(ec), m_state(state), m_text(text), m_func(func)
     {}
 
+    SYM_INLINE
     const char * SQLError::rcodeName(SQLRETURN r)
     {
         switch (r) {
@@ -164,6 +171,7 @@ namespace odbc {
         }
     }
 
+    SYM_INLINE
     std::string SQLError::str() const
     {   
         std::ostringstream os;
@@ -171,6 +179,7 @@ namespace odbc {
         return os.str();
     }
 
+    SYM_INLINE
     SQLError SQLError::makeError(const char * func, SQLRETURN r, SQLSMALLINT htype, SQLHANDLE h)
     {
         SQLCHAR state[8];
@@ -201,16 +210,19 @@ namespace odbc {
 } // end namespace odbc
 
 namespace odbc {
+    SYM_INLINE
     SQLConnection::SQLConnection(SQLEnvironment * env, SQLError *e)
     {
         this->init(env, e);
     }
 
+    SYM_INLINE
     bool SQLConnection::init(SQLEnvironment *env, SQLError * e)
     {
         return this->SQLHandle::init(SQL_HANDLE_DBC, env->handle(), SQL_HANDLE_ENV, e);
     }
 
+    SYM_INLINE
     bool SQLConnection::open(const char * dsn, const char *user, const char * pwd, SQLError *e)
     {
         SQLRETURN r = SQLConnect(
@@ -219,6 +231,7 @@ namespace odbc {
         return SYM_ODBC_MAKE_RETURN("SQLConnect", r, e, SQL_HANDLE_DBC, this->handle());
     }
 
+    SYM_INLINE
     bool SQLConnection::close(SQLError * e) 
     {
         SQLRETURN r = SQLDisconnect(this->handle());
@@ -229,12 +242,15 @@ namespace odbc {
 
 
 namespace odbc {
+
+    SYM_INLINE
     SQLHandle::SQLHandle(SQLHandle && other) 
         : m_handle ( other.m_handle )
     {
         other.m_handle = SQL_NULL_HANDLE;
     }
 
+    SYM_INLINE
     SQLHandle::~SQLHandle() {
         if ( m_handle != SQL_NULL_HANDLE ) {
             SQLFreeHandle(m_htype, m_handle);
@@ -242,6 +258,7 @@ namespace odbc {
         }
     }
 
+    SYM_INLINE
     bool SQLHandle::init(SQLSMALLINT type, SQLHANDLE hIn, SQLSMALLINT hInType, SQLError *e)
     {
         SQLRETURN r = SQLAllocHandle(type, hIn, &m_handle);
@@ -250,6 +267,7 @@ namespace odbc {
         return SYM_ODBC_MAKE_RETURN("SQLAllocHandle", r, e, hInType, hIn);
     }
 
+    SYM_INLINE
     bool SQLHandle::initEnv(SQLError *e)
     {
         SQLRETURN r = SQLAllocHandle(SQL_HANDLE_ENV, SQL_NULL_HANDLE, &m_handle);
@@ -267,10 +285,12 @@ namespace odbc {
 
 namespace odbc {
     
+    SYM_INLINE
     SQLEnvironment::SQLEnvironment(SQLError *e) {
         this->init(e);
     } 
 
+    SYM_INLINE
     bool SQLEnvironment::init(SQLError *e) {
         if ( SQLHandle::handle() == SQL_NULL_HANDLE ) {
             SQLRETURN r = this->SQLHandle::initEnv(e);
@@ -281,7 +301,6 @@ namespace odbc {
 
             return SYM_ODBC_MAKE_RETURN("SQLSetEnvAttr", r, e, SQL_HANDLE_ENV, this->handle());
         }
-
         return true;
     }
 
