@@ -12,6 +12,19 @@
 
 BEGIN_SYM_NAMESPACE
 
+/// 根据ODBC API函数的结果生成返回值。
+# define SYM_ODBC_MAKE_RETURN(func, r, e, htype, handle) \
+    ({    \
+        bool isok;  \
+        if ( r == SQL_ERROR || r == SQL_SUCCESS_WITH_INFO) { \
+            *e = SQLError::makeError(func, r, htype, handle); \
+        } \
+        if ( r == SQL_SUCCESS || r == SQL_SUCCESS_WITH_INFO ) isok = true; \
+        else isok = false;  \
+        isok;   \
+    })
+
+/// odbc名称空间，包含对ODBC操作的封装。
 namespace odbc
 {
     class SQLError {
@@ -26,11 +39,12 @@ namespace odbc
         SQLINTEGER  m_ecode;
         std::string m_state;
         std::string m_text;
+        std::string m_func;
 
     public:
         SQLError() : m_rcode(SQL_SUCCESS) {}
         SQLError(int rc) : m_rcode(rc) {} 
-        SQLError(int rc, int ec, const char * state, const char * text);
+        SQLError(const char * func, int rc, int ec, const char * state, const char * text);
 
         int rcode() const { return m_rcode; }
         int ecode() const { return m_ecode; }
@@ -38,7 +52,7 @@ namespace odbc
         std::string str() const; 
 
     public:
-        static SQLError makeError(SQLRETURN r, SQLSMALLINT htype, SQLHANDLE h);
+        static SQLError makeError(const char * func, SQLRETURN r, SQLSMALLINT htype, SQLHANDLE h);
         static const char * rcodeName(SQLRETURN r);
     }; // end class 
 
@@ -71,7 +85,6 @@ namespace odbc
 
         bool init(SQLError * e);
 
-        bool SetDefaultVersion(SQLError *e);
     }; // end class SQLEnvironment
 
     class SQLConnection : public SQLHandle
@@ -88,8 +101,8 @@ namespace odbc
 
 namespace odbc {
 
-    SQLError::SQLError(int rc, int ec, const char * state, const char * text)
-        : m_rcode(rc), m_ecode(ec), m_state(state), m_text(text) 
+    SQLError::SQLError(const char * func, int rc, int ec, const char * state, const char * text)
+        : m_rcode(rc), m_ecode(ec), m_state(state), m_text(text), m_func(func)
     {}
 
     const char * SQLError::rcodeName(SQLRETURN r)
@@ -107,11 +120,11 @@ namespace odbc {
     std::string SQLError::str() const
     {   
         std::ostringstream os;
-        os<<SQLError::rcodeName(m_rcode)<<':'<<m_ecode<<':'<<m_state<<':'<<m_text;
+        os<<m_func<<':'<<SQLError::rcodeName(m_rcode)<<':'<<m_ecode<<':'<<m_state<<':'<<m_text;
         return os.str();
     }
 
-    SQLError SQLError::makeError(SQLRETURN r, SQLSMALLINT htype, SQLHANDLE h)
+    SQLError SQLError::makeError(const char * func, SQLRETURN r, SQLSMALLINT htype, SQLHANDLE h)
     {
         SQLCHAR state[8];
         SQLINTEGER ec;
@@ -132,7 +145,7 @@ namespace odbc {
         }
 
         if ( r1 == SQL_SUCCESS ) {
-            return SQLError(r, ec, (const char *)state, (const char *)text.data());
+            return SQLError(func, r, ec, (const char *)state, (const char *)text.data());
         } else {
             return SQLError(r);
         }
@@ -173,33 +186,16 @@ namespace odbc {
         SQLRETURN r = SQLAllocHandle(type, hIn, &m_handle);
         m_htype = type;
 
-        if ( r == SQL_SUCCESS ) {
-            return true;
-        } 
-        else if ( r == SQL_ERROR || r == SQL_SUCCESS_WITH_INFO || r == SQL_INVALID_HANDLE)
-        {
-            *e = SQLError::makeError(r, hInType, hIn);
-            return false;
-        } else {
-            assert("SYM::ODBC::SQLHANDLE unknow return value" == nullptr);
-        }
+        return SYM_ODBC_MAKE_RETURN("SQLAllocHandle", r, e, hInType, hIn);
     }
 
     bool SQLHandle::initEnv(SQLError *e)
     {
         SQLRETURN r = SQLAllocHandle(SQL_HANDLE_ENV, SQL_NULL_HANDLE, &m_handle);
         
-        if ( r == SQL_SUCCESS ) {
-            m_htype = SQL_HANDLE_ENV;
-            return true;
-        } 
-        else if ( r == SQL_ERROR || r == SQL_SUCCESS_WITH_INFO || r == SQL_INVALID_HANDLE)
-        {
-            *e = SQLError::makeError(r, SQL_HANDLE_ENV, SQL_NULL_HANDLE);
-            return false;
-        } else {
-            assert("SYM::ODBC::SQLHANDLE unknow return value" == nullptr);
-        }
+        if ( r == SQL_SUCCESS ) m_htype = SQL_HANDLE_ENV;
+        
+        return SYM_ODBC_MAKE_RETURN("SQLAllocHandle", r, e, SQL_HANDLE_ENV, SQL_NULL_HANDLE);
     }
 
 } // 
@@ -216,27 +212,18 @@ namespace odbc {
 
     bool SQLEnvironment::init(SQLError *e) {
         if ( SQLHandle::handle() == SQL_NULL_HANDLE ) {
-            return this->SQLHandle::initEnv(e);
+            SQLRETURN r = this->SQLHandle::initEnv(e);
+            if ( r != SQL_SUCCESS && r != SQL_SUCCESS_WITH_INFO ) return false;
+        
+            r = SQLSetEnvAttr(this->handle(), SQL_ATTR_ODBC_VERSION, 
+                (SQLPOINTER)SQL_OV_ODBC3, SQL_NTS);
+
+            return SYM_ODBC_MAKE_RETURN("SQLSetEnvAttr", r, e, SQL_HANDLE_ENV, this->handle());
         }
+
         return true;
     }
 
-    bool SQLEnvironment::SetDefaultVersion(SQLError *e)
-    {
-        SQLRETURN r = SQLSetEnvAttr(
-            this->handle(), SQL_ATTR_ODBC_VERSION, 
-            (SQLPOINTER)SQL_OV_ODBC3, SQL_NTS);
-        if ( r == SQL_SUCCESS ) {
-            return true;
-        } 
-        else if ( r == SQL_ERROR || r == SQL_SUCCESS_WITH_INFO || r == SQL_INVALID_HANDLE)
-        {
-            *e = SQLError::makeError(r, SQL_HANDLE_ENV, this->handle());
-            return false;
-        } else {
-            assert("SYM::ODBC::SQLHANDLE unknow return value" == nullptr);
-        }
-    }
 } //end namespace odbc
 
 
