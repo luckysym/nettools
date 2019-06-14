@@ -108,6 +108,7 @@ namespace odbc
         virtual ~SQLStatement() {}
 
         bool init(SQLConnection *conn, SQLError *e);
+        bool exec(const char * sql, SQLError *e);
     }; // end class SQLStatement
 
 } // end namespace
@@ -122,6 +123,12 @@ namespace odbc {
     bool SQLStatement::init(SQLConnection *conn, SQLError *e)
     {
         return this->SQLHandle::init(SQL_HANDLE_STMT, conn->handle(), SQL_HANDLE_DBC, e);
+    }
+
+    bool SQLStatement::exec(const char * sql, SQLError * e) 
+    {
+        SQLRETURN r = SQLExecDirect(this->handle(), (SQLCHAR*)sql, SQL_NTS);
+        return SYM_ODBC_MAKE_RETURN("SQLExecDirect", r, e, SQL_HANDLE_STMT, this->handle());
     }
 
 } // end namespace odbc
