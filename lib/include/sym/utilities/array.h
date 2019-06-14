@@ -54,6 +54,7 @@ namespace util
         size_t size() const { return m_impl.m_size; }
         T * detach() { return m_impl.detach(); }
         Alloc & allocator() { return m_impl.m_alloc; }
+
     }; // end class Array
 
 } // end namespace util
