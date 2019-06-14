@@ -95,6 +95,7 @@ namespace odbc
         virtual ~SQLConnection() {}
 
         bool init(SQLEnvironment * env, SQLError * e);
+        bool open(const char * connstr, const char *user, const char * pwd, SQLError *e);
     }; // end classs SQLConnection
 
 } // end namespace
@@ -162,6 +163,14 @@ namespace odbc {
     bool SQLConnection::init(SQLEnvironment *env, SQLError * e)
     {
         return this->SQLHandle::init(SQL_HANDLE_DBC, env->handle(), SQL_HANDLE_ENV, e);
+    }
+
+    bool SQLConnection::open(const char * dsn, const char *user, const char * pwd, SQLError *e)
+    {
+        SQLRETURN r = SQLConnect(
+            this->handle(), (SQLCHAR*)dsn, SQL_NTS, (SQLCHAR*)user, SQL_NTS, (SQLCHAR*)pwd, SQL_NTS);
+
+        return SYM_ODBC_MAKE_RETURN("SQL_CONNECT", r, e, SQL_HANDLE_DBC, this->handle());
     }
 
 } // end namespace odbc
