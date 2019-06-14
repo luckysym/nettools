@@ -99,7 +99,32 @@ namespace odbc
         bool close(SQLError *e);
     }; // end classs SQLConnection
 
+    /// SQL Statement封装类
+    class SQLStatement : public SQLHandle 
+    {
+    public:
+        SQLStatement() {}
+        SQLStatement(SQLConnection * conn, SQLError * e);
+        virtual ~SQLStatement() {}
+
+        bool init(SQLConnection *conn, SQLError *e);
+    }; // end class SQLStatement
+
 } // end namespace
+
+namespace odbc {
+
+    SQLStatement::SQLStatement(SQLConnection * conn, SQLError * e)
+    {
+        this->init(conn, e);
+    }
+
+    bool SQLStatement::init(SQLConnection *conn, SQLError *e)
+    {
+        return this->SQLHandle::init(SQL_HANDLE_STMT, conn->handle(), SQL_HANDLE_DBC, e);
+    }
+
+} // end namespace odbc
 
 namespace odbc {
 
