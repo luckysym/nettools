@@ -85,6 +85,23 @@ int main(int argc, char **argv)
         return -1;
     }
 
+    // 查询数据集
+    sqltext1 = "select * from test1";
+    isok = stmt1.exec(sqltext1, &err);
+    if ( !isok ) {
+        cout<<__FILE__<<':'<<__LINE__<<' '<<err.str()<<endl;
+        return -1;
+    }
+    db::SQLResultSet rs1;
+    isok = rs1.bind(&stmt1, &err);
+    isok = stmt1.exec(sqltext1, &err);
+    if ( !isok ) {
+        cout<<__FILE__<<':'<<__LINE__<<' '<<err.str()<<endl;
+        return -1;
+    }
+    while ( rs1.next(&err) ) {
+        cout<<rs1.getString(1)<<endl;
+    }
 
     // 关闭连接
     isok = conn.close(&err);
