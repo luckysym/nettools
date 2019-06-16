@@ -20,11 +20,13 @@ namespace odbc
         std::string m_state;
         std::string m_text;
         std::string m_func;
+        std::string m_hint;
 
     public:
         SQLError() : m_rcode(SQL_SUCCESS) {}
         SQLError(int rc) : m_rcode(rc) {} 
         SQLError(const char * func, int rc, int ec, const char * state, const char * text);
+        SQLError(const char * func, int rc, int ec, const char * state, const char * text, const char *hint);
 
         int rcode() const { return m_rcode; }
         int ecode() const { return m_ecode; }
@@ -48,6 +50,11 @@ namespace odbc
     {}
 
     SYM_INLINE
+    SQLError::SQLError(const char * func, int rc, int ec, const char * state, const char * text, const char *hint)
+        : m_rcode(rc), m_ecode(ec), m_state(state), m_text(text), m_func(func), m_hint(hint)
+    {}
+
+    SYM_INLINE
     const char * SQLError::rcodeName(SQLRETURN r)
     {
         switch (r) {
@@ -65,6 +72,7 @@ namespace odbc
     {   
         std::ostringstream os;
         os<<m_func<<':'<<SQLError::rcodeName(m_rcode)<<':'<<m_ecode<<':'<<m_state<<':'<<m_text;
+        if ( !m_hint.empty() ) os<<m_hint;
         return os.str();
     }
 
