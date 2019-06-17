@@ -103,7 +103,50 @@ int main(int argc, char **argv)
         cout<<rs1.getString(1)<<endl;
     }
 
+    cout<<">>> SET AUTO COMMIT OFF <<<"<<endl;
+    // 开启手动事务
+    isok = conn.setAutoCommit(false, &err);
+    if ( !isok ) {
+        cout<<__FILE__<<':'<<__LINE__<<' '<<err.str()<<endl;
+        return -1;
+    }
+
+    // 执行删除操作
+    cout<<">>> DELETE FROM test1 <<<"<<endl;
+    sqltext1 = "DELETE FROM test1 WHERE id = 'world'";
+    isok = stmt1.exec(sqltext1, &err);
+    if ( !isok ) {
+        cout<<__FILE__<<':'<<__LINE__<<' '<<err.str()<<endl;
+        return -1;
+    }
+
+    // 回退
+    cout<<">>> ROLLBACK TRANS <<<"<<endl;
+    isok = conn.rollback(&err);
+    if ( !isok ) {
+        cout<<__FILE__<<':'<<__LINE__<<' '<<err.str()<<endl;
+        return -1;
+    }
+
+    // 再次删除
+    cout<<">>> DELETE FROM test1 <<<"<<endl;
+    sqltext1 = "DELETE FROM test1 WHERE id = 'world'";
+    isok = stmt1.exec(sqltext1, &err);
+    if ( !isok ) {
+        cout<<__FILE__<<':'<<__LINE__<<' '<<err.str()<<endl;
+        return -1;
+    }
+
+    // 提交
+    cout<<">>> COMMIT TRANS <<<"<<endl;
+    isok = conn.commit(&err);
+    if ( !isok ) {
+        cout<<__FILE__<<':'<<__LINE__<<' '<<err.str()<<endl;
+        return -1;
+    }
+
     // 关闭连接
+    cout<<">>> CLOSE CONNECTION <<<"<<endl; 
     isok = conn.close(&err);
     if ( !isok ) {
         cout<<__FILE__<<':'<<__LINE__<<' '<<err.str()<<endl;
