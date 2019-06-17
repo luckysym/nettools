@@ -27,6 +27,12 @@ namespace util
             return (T*)p;
         }
 
+        T * reallocate(T * p, size_t oldsize, size_t newsize) 
+        {
+            if ( oldsize >= newsize ) return p;
+            else return (T*)realloc(p, sizeof(T) * newsize);
+        }
+
         void deallocate(T * p, size_t n)
         {
             free(p);

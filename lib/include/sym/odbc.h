@@ -272,6 +272,7 @@ namespace odbc
     void SQLParameter::setValue(const void * ptr, size_t len)
     {
         util::Array<char> newArray(len);
+        newArray.resize(len);
         m_buffer = std::move(newArray);
         if ( len <= 16 ) for(int i = 0; i < len; ++i) m_buffer[i] = reinterpret_cast<const char*>(ptr)[i];
         else memcpy(m_buffer.data(), ptr, len);
