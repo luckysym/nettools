@@ -36,6 +36,10 @@ namespace odbc
         bool init(SQLEnvironment * env, SQLError * e);
         bool open(const char * connstr, const char *user, const char * pwd, SQLError *e);
         bool close(SQLError *e);
+        bool setAutoCommit(bool autoCommit, SQLError * e);
+        bool commit(SQLError * e);
+        bool rollback(SQLError * e);
+        
     }; // end classs SQLConnection
 
     /// SQL Statement封装类
@@ -369,6 +373,35 @@ namespace odbc {
     {
         SQLRETURN r = SQLDisconnect(this->handle());
         return SYM_ODBC_MAKE_RETURN("SQLDisconnect", r, e, SQL_HANDLE_DBC, this->handle());
+    }
+
+    SYM_INLINE 
+    bool SQLConnection::setAutoCommit(bool autoCommit, SQLError * e)
+    {
+        SQLUINTEGER value = autoCommit?SQL_AUTOCOMMIT_ON :SQL_AUTOCOMMIT_OFF;
+
+        SQLRETURN r =  SQLSetConnectAttr(
+            this->handle(),
+            SQL_ATTR_AUTOCOMMIT,
+            (SQLPOINTER)value,
+            SQL_IS_UINTEGER);
+        return SYM_ODBC_MAKE_RETURN(
+            "SQLSetConnectAttr(SQL_ATTR_AUTOCOMMIT)", 
+            r, e, SQL_HANDLE_DBC, this->handle());
+    }
+
+    SYM_INLINE
+    bool SQLConnection::commit(SQLError * e)
+    {   
+        SQLRETURN r = SQLEndTran(SQL_HANDLE_DBC, this->handle(), SQL_COMMIT );
+        return SYM_ODBC_MAKE_RETURN("SQLEndTran(SQL_COMMIT)", r, e, SQL_HANDLE_DBC, this->handle());
+    }
+
+    SYM_INLINE
+    bool SQLConnection::rollback(SQLError * e)
+    {
+        SQLRETURN r = SQLEndTran(SQL_HANDLE_DBC, this->handle(), SQL_ROLLBACK );
+        return SYM_ODBC_MAKE_RETURN("SQLEndTran(SQL_ROLLBACK)", r, e, SQL_HANDLE_DBC, this->handle());
     }
 
 } // end namespace odbc
