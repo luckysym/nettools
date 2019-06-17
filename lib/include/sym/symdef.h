@@ -14,8 +14,6 @@
 #   define END_SYM_NAMESPACE
 # endif // end USE_SYM_NAMESPACE 
 
-
-
 # ifdef USE_SYM_INLINE
 #   define SYM_INLINE inline
 # else
@@ -29,4 +27,17 @@
     cls & operator=(const cls & other) = delete; \
 
 
+///
+# define SYM_MAKE_MOVE_CONSTRUCTOR()
+
+
+/// 默认的move操作实现
+# define SYM_MOVE_OPERATOR_IMPL() \
+    do { \
+        if ( this != &other) { \
+            if ( m_impl != nullptr ) delete m_impl; \
+            m_impl = other.m_impl; \
+            other.m_impl = nullptr; \
+        } \
+    } while (0)
 

@@ -2,11 +2,12 @@
 
 # include <sym/symdef.h>
 
+# include <sym/odbc/impl/sql_error_impl.h>
+
 BEGIN_SYM_NAMESPACE
 
 namespace odbc
 {
-
     class SQLError {
     public:
         static const int rcSuccess       = SQL_SUCCESS;
@@ -15,21 +16,22 @@ namespace odbc
         static const int rcError         = SQL_ERROR;
         
     private:
-        SQLRETURN   m_rcode;
-        SQLINTEGER  m_ecode;
-        std::string m_state;
-        std::string m_text;
-        std::string m_func;
-        std::string m_hint;
+        SQLErrorImpl * m_impl;
 
     public:
-        SQLError() : m_rcode(SQL_SUCCESS) {}
-        SQLError(int rc) : m_rcode(rc) {} 
+        SQLError();
+        SQLError(int rc);
         SQLError(const char * func, int rc, int ec, const char * state, const char * text);
         SQLError(const char * func, int rc, int ec, const char * state, const char * text, const char *hint);
+        SQLError(const SQLError &other);
+        SQLError(SQLError && other);
+        ~SQLError();
 
-        int rcode() const { return m_rcode; }
-        int ecode() const { return m_ecode; }
+        SQLError & operator=(const SQLError &other);
+        SQLError & operator=(SQLError && other);
+
+        int rcode() const;
+        int ecode() const;
 
         std::string str() const; 
 
@@ -43,16 +45,57 @@ namespace odbc
 
 namespace odbc
 {
+    SYM_INLINE
+    SQLError::SQLError() : m_impl(nullptr) {}
+
+    SYM_INLINE 
+    SQLError::SQLError(int rc) : m_impl(new SQLErrorImpl("", rc, 0, "", "", ""))
+    {}
 
     SYM_INLINE
     SQLError::SQLError(const char * func, int rc, int ec, const char * state, const char * text)
-        : m_rcode(rc), m_ecode(ec), m_state(state), m_text(text), m_func(func)
+        : m_impl(new SQLErrorImpl(func, rc, ec, state, text, ""))
+    {}
+    
+    SYM_INLINE
+    SQLError::SQLError(const char * func, int rc, int ec, const char * state, const char * text, const char *hint)
+        : m_impl(new SQLErrorImpl(func, rc, ec, state, text, hint))
     {}
 
     SYM_INLINE
-    SQLError::SQLError(const char * func, int rc, int ec, const char * state, const char * text, const char *hint)
-        : m_rcode(rc), m_ecode(ec), m_state(state), m_text(text), m_func(func), m_hint(hint)
-    {}
+    SQLError::SQLError(const SQLError & other) : m_impl(nullptr)
+    {
+        if ( other.m_impl ) m_impl = new SQLErrorImpl(*other.m_impl);
+    }
+
+    SYM_INLINE
+    SQLError::SQLError(SQLError && other) : m_impl(other.m_impl) 
+    {
+        other.m_impl = nullptr;
+    }
+
+    SYM_INLINE 
+    SQLError::~SQLError() {
+        if ( m_impl ) delete m_impl;
+        m_impl = nullptr;
+    }
+
+    SYM_INLINE 
+    SQLError & SQLError::operator=(const SQLError & other)
+    {
+        if  ( this != &other) {
+            if ( m_impl == nullptr ) m_impl = new SQLErrorImpl(*other.m_impl);
+            else *m_impl = *other.m_impl;
+        }
+        return *this;
+    } 
+
+    SYM_INLINE 
+    SQLError & SQLError::operator=(SQLError && other) 
+    {
+        SYM_MOVE_OPERATOR_IMPL();
+        return *this;
+    }
 
     SYM_INLINE
     const char * SQLError::rcodeName(SQLRETURN r)
@@ -68,12 +111,29 @@ namespace odbc
     }
 
     SYM_INLINE
+    int SQLError::rcode() const { 
+        if ( m_impl ) return m_impl->m_rcode; 
+        else return SQL_SUCCESS;
+    }
+    
+    SYM_INLINE
+    int SQLError::ecode() const { 
+        if ( m_impl ) return m_impl->m_ecode; 
+        else return 0;
+    }
+
+    SYM_INLINE
     std::string SQLError::str() const
     {   
-        std::ostringstream os;
-        os<<m_func<<':'<<SQLError::rcodeName(m_rcode)<<':'<<m_ecode<<':'<<m_state<<':'<<m_text;
-        if ( !m_hint.empty() ) os<<m_hint;
-        return os.str();
+        if ( m_impl ) {
+            std::ostringstream os;
+            os<<m_impl->m_func<<':'<<SQLError::rcodeName(m_impl->m_rcode)<<':'
+              <<m_impl->m_ecode<<':'<<m_impl->m_state<<':'<<m_impl->m_text;
+            if ( !m_impl->m_hint.empty() ) os<<m_impl->m_hint;
+            return os.str();
+        } else {
+            return std::string();
+        }
     }
 
     SYM_INLINE
