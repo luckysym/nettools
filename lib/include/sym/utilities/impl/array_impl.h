@@ -68,6 +68,17 @@ namespace util
             }
         }
 
+        /// 分配并构造size个元素并设置初始化值(按数组逐个复制)
+        void allocateCopy(size_t size, const T * values) {
+            if ( size > 0 ) 
+            {
+                m_begin = m_alloc.allocate(size);
+                m_alloc.construct(m_begin, size, values);
+                m_cap  = size;
+                m_len  = size;
+            }
+        }
+
         T * detach() {
             T * p = m_begin;
             m_begin = nullptr;
@@ -88,16 +99,33 @@ namespace util
 
         void resize(size_t n) {
             if ( n < m_len ) {
-                for(size_t i = n; i < m_len; ++i) m_begin[i].~T();
+                m_alloc.destroy(m_begin + n, m_len - n);
                 m_len = n;
             } 
             else if ( n > m_len && n <= m_cap) {
-                for(size_t i = m_len; i < n; ++i) new (m_begin + i) T();
+                m_alloc.construct(m_begin + m_len, n - m_len);
                 m_len = n;
             }
             else if ( n > m_cap ) {
                 m_alloc.reallocate(m_begin, m_cap, n);
-                for( size_t i = m_len; i < n; ++i) new (m_begin + i) T();
+                m_alloc.construct(m_begin + m_len, n - m_len);
+                m_len = n;
+                m_cap = n;
+            } 
+        }
+
+        void resize(size_t n, const T & init) {
+            if ( n < m_len ) {
+                m_alloc.destroy(m_begin + n, m_len - n);
+                m_len = n;
+            } 
+            else if ( n > m_len && n <= m_cap) {
+                m_alloc.contruct(m_begin + m_len, n - m_len, init);
+                m_len = n;
+            }
+            else if ( n > m_cap ) {
+                m_alloc.reallocate(m_begin, m_cap, n);
+                m_alloc.construct(m_begin + m_len, n - m_len, init);
                 m_len = n;
                 m_cap = n;
             } 

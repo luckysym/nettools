@@ -79,13 +79,14 @@ namespace util {
     template<class T, class Alloc>
     Array<T, Alloc>::Array(size_t cap)
     {
-        m_impl.allocate(cap);
+        m_impl.allocate(cap);  // 仅分配
     }
 
     template<class T, class Alloc>
     Array<T, Alloc>::Array(size_t size, const T & value)
     {
-        m_impl.allocate(size, value);
+        m_impl.allocate(size, value);  // 分配
+        m_impl.resize(size, value);    // 初始化
     }
 
     template<class T, class Alloc>
@@ -108,7 +109,7 @@ namespace util {
     Array<T, Alloc>::Array(const Array<T, Alloc> & other)
     {
         m_impl.m_alloc = other.allocator();
-        m_impl.allocate(other.capacity(), other.data(), other.size());
+        m_impl.allocateCopy(other.capacity(), other.data(), other.size());
     }
 
     template<class T, class Alloc>
@@ -165,7 +166,7 @@ namespace util {
     Array<T, Alloc>::Array(const Array<T, Alloc> & other, const Alloc & alloc)
         : m_impl(alloc)
     {
-        m_impl.allocate(other.capacity(), other.data(), other.size());
+        m_impl.allocateCopy(other.capacity(), other.data(), other.size());
     }
 
     template<class T, class Alloc>
@@ -175,7 +176,6 @@ namespace util {
         m_impl.m_len = other.size();
         m_impl.m_cap = other.capacity();
         m_impl.m_begin = other.detach();
-        m_impl.m_alloc = std::move(other.allocator());
     }
 
     template<class T, class Alloc>
@@ -196,6 +196,7 @@ namespace util {
     {
         if ( this != &other) {
             m_impl.destroy();
+            m_impl.m_alloc = other.allocator();
             m_impl.allocate(other.capacity(), other.data(), other.size());
         }
         return *this;
