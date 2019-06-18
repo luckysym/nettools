@@ -30,6 +30,7 @@ namespace odbc
 
         SQLError & operator=(const SQLError &other);
         SQLError & operator=(SQLError && other);
+        operator bool () const;
 
         int rcode() const;
         int ecode() const;

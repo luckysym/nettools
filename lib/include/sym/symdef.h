@@ -41,3 +41,20 @@
         } \
     } while (0)
 
+/// 计算size按pad对齐的数值
+# define SYM_PADDING(size, pad)  (((size ) + (pad - 1)) & ~(pad-1))
+
+/// 判断val是否在列表lst中
+# define SYM_VALUE_IN_LIST(val, lst)    \
+    ({  \
+        bool found = false; \
+        for( auto it = lst.begin(); it != lst.end(); ++it) {    \
+            if ( *it == val ) { \
+                found = true;   \
+                break;  \
+            }   \
+        }   \
+        found;  \
+    })
+
+

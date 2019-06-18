@@ -72,13 +72,15 @@ namespace odbc
 
         struct ColumnValue
         {
-            ssize_t lenOrInd;
+            int64_t lenOrInd;
             char    data[0];
         };
     public:
         SQLStatement * m_stmt;
         std::vector<ColumnDesc> m_cols;
         std::vector<char>       m_record;   // record buffer
+        bool                    m_wasNull;  // 最后一个获取的列是否是NULL；
+
     public:
         SQLResultSetImpl() : m_stmt(nullptr) {}
 
@@ -120,40 +122,54 @@ namespace odbc
 
         size_t dbSizeToCSize(SQLSMALLINT dbtype, SQLSMALLINT colsize)
         {
-            if ( dbtype == SQL_CHAR || dbtype == SQL_VARCHAR || dbtype == SQL_WCHAR || dbtype == SQL_WVARCHAR) {
-                return ((colsize + 1) + 7) & ~7;  // 按8字节对齐
-            } else {
+            if ( SYM_VALUE_IN_LIST(dbtype, CharTypes()) ) return SYM_PADDING(colsize, 8);
+            else if ( SYM_VALUE_IN_LIST(dbtype, IntTypes()) ) return sizeof(int64_t);
+            else {
+                SYM_TRACE_VA("*** unsupported type: %d", dbtype);
                 assert("UNSUPPORT DBTYPE " == nullptr);
             }
+            
         }
 
         SQLSMALLINT dbTypeToCType(SQLSMALLINT dbtype ) 
         {
-            if ( dbtype == SQL_CHAR || dbtype == SQL_VARCHAR || dbtype == SQL_WCHAR || dbtype == SQL_WVARCHAR) 
-                return SQL_C_CHAR;
-            else 
+            if ( SYM_VALUE_IN_LIST(dbtype, CharTypes()) ) return SQL_C_CHAR;
+            else if (SYM_VALUE_IN_LIST(dbtype, IntTypes())) return SQL_C_LONG;
+            else {
+                SYM_TRACE_VA("*** unsupported type: %d", dbtype);
                 assert("UNSUPPORT DBTYPE " == nullptr);
+            }
+        }
+
+        static std::initializer_list<SQLSMALLINT> & CharTypes() {
+            static std::initializer_list<SQLSMALLINT> types = 
+                {SQL_CHAR, SQL_VARCHAR, SQL_WCHAR, SQL_WVARCHAR};
+            return types;
+        }
+
+        static std::initializer_list<SQLSMALLINT> & IntTypes() {
+            static std::initializer_list<SQLSMALLINT> types = 
+                {SQL_IS_UINTEGER,SQL_IS_INTEGER};
+            return types;
         }
     }; // end class SQLResultSetImpl
 
     class SQLResultSet
     {
     private:
+        SYM_NONCOPYABLE(SQLResultSet);
         SQLResultSetImpl * m_impl;
     public:
 
-        SQLResultSet() : m_impl(nullptr) {}
+        SQLResultSet();
+        SQLResultSet(SQLStatement * stmt, SQLError *e);
+        ~SQLResultSet();
 
-        ~SQLResultSet() {
-            if ( m_impl ) {
-                delete m_impl;
-                m_impl = nullptr;
-            }
-        }
 
-        bool bind(SQLStatement * stmt, SQLError *e);
+        bool init(SQLStatement * stmt, SQLError *e);
         bool next(SQLError * e);
 
+        int         getInt(int col) const;
         std::string getString(int col) const;
     }; // end class SQLResultSet
 
@@ -190,6 +206,34 @@ namespace odbc
 
 namespace odbc
 {
+    SQLResultSet::SQLResultSet() : m_impl(nullptr) {}
+
+    SQLResultSet::SQLResultSet(SQLStatement * stmt, SQLError *e)
+        : m_impl(nullptr)
+    {
+        this->init(stmt, e);
+    }
+
+    SQLResultSet::~SQLResultSet() {
+        if ( m_impl ) {
+            delete m_impl;
+            m_impl = nullptr;
+        }
+    }
+
+    int SQLResultSet::getInt(int col) const 
+    {
+        assert( col <= m_impl->m_cols.size() );
+        SQLResultSetImpl::ColumnDesc & desc = m_impl->m_cols[col-1];
+        SQLResultSetImpl::ColumnValue * ptr = (SQLResultSetImpl::ColumnValue *)&m_impl->m_record[desc.valueoffet];
+        if ( ptr->lenOrInd == SQL_NULL_DATA ) {
+            m_impl->m_wasNull = true;
+            return 0;
+        } else {
+            m_impl->m_wasNull = false;
+            return (int)(*(int64_t*)ptr->data);
+        }
+    }
 
     std::string SQLResultSet::getString(int col) const
     {
@@ -198,8 +242,10 @@ namespace odbc
         SQLResultSetImpl::ColumnValue * ptr = (SQLResultSetImpl::ColumnValue *)&m_impl->m_record[desc.valueoffet];
         // SYM_TRACE_VA("GETSTRING offset: %ld", desc.valueoffet);
         if ( ptr->lenOrInd == SQL_NULL_DATA ) {
+            m_impl->m_wasNull = true;
             return std::string();
         } else {
+            m_impl->m_wasNull = false;
             SQLLEN len = *(SQLLEN*)&ptr->lenOrInd;
             return std::string(ptr->data, len);
         }
@@ -216,7 +262,7 @@ namespace odbc
         return SYM_ODBC_MAKE_RETURN("SQLFetch", r, e, SQL_HANDLE_STMT, m_impl->m_stmt->handle());
     }
 
-    bool SQLResultSet::bind(SQLStatement * stmt, SQLError * e)
+    bool SQLResultSet::init(SQLStatement * stmt, SQLError * e)
     {
         if ( m_impl == nullptr ) m_impl = new SQLResultSetImpl();
         m_impl->m_stmt = stmt;

@@ -80,6 +80,12 @@ namespace odbc
     }
 
     SYM_INLINE
+    SQLError::operator bool () const {
+        if ( m_impl->m_rcode == SQL_ERROR ) return false; 
+        else return true;
+    }
+
+    SYM_INLINE
     const char * SQLError::rcodeName(SQLRETURN r)
     {
         switch (r) {

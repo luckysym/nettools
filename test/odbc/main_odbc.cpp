@@ -1,6 +1,9 @@
 #include <sym/odbc.h>
 #include <assert.h>
 #include <iostream>
+#include <future>
+#include <thread>
+#include <stdlib.h>
 
 namespace db = sym::odbc;
 using namespace std;
@@ -93,14 +96,29 @@ int main(int argc, char **argv)
         return -1;
     }
     db::SQLResultSet rs1;
-    isok = rs1.bind(&stmt1, &err);
-    isok = stmt1.exec(sqltext1, &err);
+    isok = rs1.init(&stmt1, &err);
     if ( !isok ) {
         cout<<__FILE__<<':'<<__LINE__<<' '<<err.str()<<endl;
         return -1;
     }
     while ( rs1.next(&err) ) {
         cout<<rs1.getString(1)<<endl;
+    }
+
+    // 查询表记录数, 数值类型值
+    sqltext1 = "select count(*) from test1";
+    isok = stmt1.exec(sqltext1, &err);
+    if ( !isok ) {
+        cout<<__FILE__<<':'<<__LINE__<<' '<<err.str()<<endl;
+        return -1;
+    }
+    db::SQLResultSet rs2(&stmt1, &err);
+    if ( !err ) {
+        cout<<__FILE__<<':'<<__LINE__<<' '<<err.str()<<endl;
+        return -1;
+    }
+    while ( rs2.next(&err) ) {
+        cout<<"count: "<<rs2.getInt(1)<<endl;
     }
 
     cout<<">>> SET AUTO COMMIT OFF <<<"<<endl;
