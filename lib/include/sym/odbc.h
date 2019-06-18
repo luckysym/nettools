@@ -142,6 +142,8 @@ namespace odbc
         SQLResultSetImpl * m_impl;
     public:
 
+        SQLResultSet() : m_impl(nullptr) {}
+
         ~SQLResultSet() {
             if ( m_impl ) {
                 delete m_impl;
