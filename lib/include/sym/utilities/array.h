@@ -196,7 +196,6 @@ namespace util {
     {
         if ( this != &other) {
             m_impl.destroy();
-            m_impl.m_alloc = other.allocator();
             m_impl.allocate(other.capacity(), other.data(), other.size());
         }
         return *this;
