@@ -49,7 +49,7 @@ int main(int argc, char **argv)
     }
 
     // 创建测试表
-    const char * sqltext1 = "create table test1 ( id varchar(64) primary key )";
+    const char * sqltext1 = "create table test1 ( id varchar(64) primary key, value integer )";
     isok = stmt1.exec(sqltext1, &err);
     if ( !isok ) {
         cout<<__FILE__<<':'<<__LINE__<<' '<<err.str()<<endl;
@@ -57,7 +57,7 @@ int main(int argc, char **argv)
     }
 
     // 使用prepare/execute插入一条固定语句的数据
-    sqltext1 = "insert into test1 (id) values ( 'hello' )";
+    sqltext1 = "insert into test1 (id, value) values ( 'hello', 1024 )";
     isok = stmt1.prepare(sqltext1, &err);
     if ( !isok ) {
         cout<<__FILE__<<':'<<__LINE__<<' '<<err.str()<<endl;
@@ -70,14 +70,20 @@ int main(int argc, char **argv)
     }
 
     // 执行一条参数化插入语句
-    sqltext1 = "insert into test1 (id) values ( ? )";
+    sqltext1 = "insert into test1 (id, value) values ( ?, ? )";
     isok = stmt1.prepare(sqltext1, &err);
     if ( !isok ) {
         cout<<__FILE__<<':'<<__LINE__<<' '<<err.str()<<endl;
         return -1;
     }
     db::SQLStringParameter param1("world");
+    db::SQLIntParameter param2(2048);
     isok = param1.bind(&stmt1, 1, &err);
+    if ( !isok ) {
+        cout<<__FILE__<<':'<<__LINE__<<' '<<err.str()<<endl;
+        return -1;
+    }
+    isok = param2.bind(&stmt1, 2, &err);
     if ( !isok ) {
         cout<<__FILE__<<':'<<__LINE__<<' '<<err.str()<<endl;
         return -1;
@@ -102,7 +108,7 @@ int main(int argc, char **argv)
         return -1;
     }
     while ( rs1.next(&err) ) {
-        cout<<rs1.getString(1)<<endl;
+        cout<<rs1.getString(1)<<','<<rs1.getInt(2)<<endl;
     }
 
     // 查询表记录数, 数值类型值
