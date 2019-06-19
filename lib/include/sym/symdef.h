@@ -45,10 +45,10 @@
 # define SYM_PADDING(size, pad)  (((size ) + (pad - 1)) & ~(pad-1))
 
 /// 判断val是否在列表lst中
-# define SYM_VALUE_IN_LIST(val, lst)    \
+# define SYM_VALUE_IN_LIST(val, begin, endval)    \
     ({  \
         bool found = false; \
-        for( auto it = lst.begin(); it != lst.end(); ++it) {    \
+        for( auto it = begin; *it != endval; ++it) {    \
             if ( *it == val ) { \
                 found = true;   \
                 break;  \

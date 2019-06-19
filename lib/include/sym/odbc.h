@@ -122,8 +122,8 @@ namespace odbc
 
         size_t dbSizeToCSize(SQLSMALLINT dbtype, SQLSMALLINT colsize)
         {
-            if ( SYM_VALUE_IN_LIST(dbtype, CharTypes()) ) return SYM_PADDING(colsize, 8);
-            else if ( SYM_VALUE_IN_LIST(dbtype, IntTypes()) ) return sizeof(int64_t);
+            if ( SYM_VALUE_IN_LIST(dbtype, charTypes(), SQL_UNKNOWN_TYPE ) ) return SYM_PADDING(colsize, 8);
+            else if ( SYM_VALUE_IN_LIST(dbtype, intTypes(), SQL_UNKNOWN_TYPE) ) return sizeof(int64_t);
             else {
                 SYM_TRACE_VA("*** unsupported type: %d", dbtype);
                 assert("UNSUPPORT DBTYPE " == nullptr);
@@ -133,23 +133,29 @@ namespace odbc
 
         SQLSMALLINT dbTypeToCType(SQLSMALLINT dbtype ) 
         {
-            if ( SYM_VALUE_IN_LIST(dbtype, CharTypes()) ) return SQL_C_CHAR;
-            else if (SYM_VALUE_IN_LIST(dbtype, IntTypes())) return SQL_C_LONG;
+            if ( SYM_VALUE_IN_LIST(dbtype, charTypes(), SQL_UNKNOWN_TYPE)) return SQL_C_CHAR;
+            else if (SYM_VALUE_IN_LIST(dbtype, intTypes(), SQL_UNKNOWN_TYPE)) return SQL_C_SBIGINT;
             else {
                 SYM_TRACE_VA("*** unsupported type: %d", dbtype);
                 assert("UNSUPPORT DBTYPE " == nullptr);
             }
         }
 
-        static std::initializer_list<SQLSMALLINT> & CharTypes() {
-            static std::initializer_list<SQLSMALLINT> types = 
-                {SQL_CHAR, SQL_VARCHAR, SQL_WCHAR, SQL_WVARCHAR};
+        const SQLSMALLINT * charTypes() {
+            static const SQLSMALLINT types[] = 
+                {
+                    SQL_CHAR, SQL_VARCHAR, SQL_LONGVARCHAR, SQL_WCHAR, SQL_WVARCHAR,
+                    SQL_UNKNOWN_TYPE
+                };
             return types;
         }
 
-        static std::initializer_list<SQLSMALLINT> & IntTypes() {
-            static std::initializer_list<SQLSMALLINT> types = 
-                {SQL_IS_UINTEGER,SQL_IS_INTEGER};
+        const SQLSMALLINT * intTypes() {
+            static const SQLSMALLINT types[] = 
+                {
+                    SQL_INTEGER, SQL_SMALLINT, SQL_BIGINT, SQL_TINYINT, SQL_BIT,
+                    SQL_UNKNOWN_TYPE
+                };
             return types;
         }
     }; // end class SQLResultSetImpl
@@ -164,7 +170,6 @@ namespace odbc
         SQLResultSet();
         SQLResultSet(SQLStatement * stmt, SQLError *e);
         ~SQLResultSet();
-
 
         bool init(SQLStatement * stmt, SQLError *e);
         bool next(SQLError * e);
@@ -202,18 +207,38 @@ namespace odbc
         virtual ~SQLStringParameter() {}
     }; // end class SQLStringParameter
 
+    class SQLIntParameter : public SQLParameter
+    {
+    public:
+        SQLIntParameter(int value);
+        virtual ~SQLIntParameter() {}
+    }; // end class SQLIntParameter
+
 } // end namespace odbc
 
 namespace odbc
 {
+    SQLIntParameter::SQLIntParameter(int value)
+        : SQLParameter(SQL_PARAM_INPUT, SQL_C_SLONG, SQL_INTEGER, SQL_NTS, 0)
+    {
+        SQLParameter::setValue(&value, sizeof(int));
+    }
+
+} // end namespace SQLIntParameter
+
+namespace odbc
+{
+    SYM_INLINE
     SQLResultSet::SQLResultSet() : m_impl(nullptr) {}
 
+    SYM_INLINE
     SQLResultSet::SQLResultSet(SQLStatement * stmt, SQLError *e)
         : m_impl(nullptr)
     {
         this->init(stmt, e);
     }
 
+    SYM_INLINE
     SQLResultSet::~SQLResultSet() {
         if ( m_impl ) {
             delete m_impl;
@@ -221,6 +246,7 @@ namespace odbc
         }
     }
 
+    SYM_INLINE
     int SQLResultSet::getInt(int col) const 
     {
         assert( col <= m_impl->m_cols.size() );
@@ -235,6 +261,7 @@ namespace odbc
         }
     }
 
+    SYM_INLINE
     std::string SQLResultSet::getString(int col) const
     {
         assert( col <= m_impl->m_cols.size());
@@ -251,6 +278,7 @@ namespace odbc
         }
     }
 
+    SYM_INLINE
     bool SQLResultSet::next(SQLError * e) 
     {
         SQLRETURN r = SQLFetch(m_impl->m_stmt->handle());
@@ -262,6 +290,7 @@ namespace odbc
         return SYM_ODBC_MAKE_RETURN("SQLFetch", r, e, SQL_HANDLE_STMT, m_impl->m_stmt->handle());
     }
 
+    SYM_INLINE
     bool SQLResultSet::init(SQLStatement * stmt, SQLError * e)
     {
         if ( m_impl == nullptr ) m_impl = new SQLResultSetImpl();
@@ -432,7 +461,7 @@ namespace odbc {
         SQLRETURN r =  SQLSetConnectAttr(
             this->handle(),
             SQL_ATTR_AUTOCOMMIT,
-            (SQLPOINTER)value,
+            (SQLPOINTER)(int64_t)value,
             SQL_IS_UINTEGER);
         return SYM_ODBC_MAKE_RETURN(
             "SQLSetConnectAttr(SQL_ATTR_AUTOCOMMIT)", 
