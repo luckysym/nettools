@@ -19,6 +19,10 @@ namespace util
         typedef const T * ConstPointer;
         typedef const T & ConstReference;
 
+        template<class U>
+        struct Rebind {
+            typedef Allocator<U> Other;
+        };
     public:
         T * allocate(size_t n) 
         {
