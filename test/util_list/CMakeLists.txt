@@ -1,0 +1,13 @@
+# CMakeLists.txt
+
+CMAKE_MINIMUM_REQUIRED(VERSION 2.8)
+PROJECT(testlist)
+AUX_SOURCE_DIRECTORY(. SRCS)
+
+SET(CMAKE_BUILD_TYPE "Debug")
+SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -fprofile-arcs -ftest-coverage -lgcov")
+SET(CMAKE_LD_FLAGS "${CMAKE_LD_FLAGS} --coverage -lgcov")
+
+INCLUDE_DIRECTORIES(../../lib/include)
+
+ADD_EXECUTABLE(${PROJECT_NAME} ${SRCS})

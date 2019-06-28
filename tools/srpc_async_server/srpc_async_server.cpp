@@ -241,7 +241,7 @@ void RecvCallback::onServiceRequestReceived(srpc::service_request_t * in, io::Co
     out.attach((const char *)resp, totallen, 1024);
     out.limit(totallen);
 
-    sleep(10);  // 停止10秒模拟运行，以便前端超时测试
+    sleep(1);  // 停止几秒模拟运行，以便前端超时测试
     return ;
 }
 

@@ -24,7 +24,7 @@ namespace util
             typedef Allocator<U> Other;
         };
     public:
-        T * allocate(size_t n) 
+        T * allocate(size_t n = 1) 
         {
             void * p = malloc(sizeof(T) * n);
             assert(p);
@@ -37,7 +37,7 @@ namespace util
             else return (T*)realloc(p, sizeof(T) * newsize);
         }
 
-        void deallocate(T * p, size_t n)
+        void deallocate(T * p, size_t n = 1)
         {
             free(p);
         }
@@ -63,7 +63,7 @@ namespace util
             }
         }
 
-        void destroy(T * p, size_t n) 
+        void destroy(T * p, size_t n = 1) 
         {
             for ( int i = 0; i < n; ++i ) {
                 p[i].~T();
