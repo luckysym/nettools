@@ -157,8 +157,8 @@ namespace nio
     }; // end class IoBase
 
     class SocketChannel : public IoBase {
-        using InputBufferQueue = std::queue<io::MutableBuffer> ;
-        using OutputBufferQueue = std::queue<io::ConstBuffer> ;
+        using InputBufferQueue = std::list<io::MutableBuffer> ;
+        using OutputBufferQueue = std::list<io::ConstBuffer> ;
     private:
         net::Socket       m_sock;
         int               m_shutFlags  { 0 };
@@ -195,14 +195,19 @@ namespace nio
         bool shutdown(int how, err::Error *e = nullptr);
         int  shutdownFlags() const { return m_shutFlags; }
 
-        void  pushInputBuffer(io::MutableBuffer & buf) { m_inputBuffers.push(buf); }
-        void  pushOutputBuffer(io::ConstBuffer & buf)  { m_outputBuffers.push(buf); }
+        void  pushInputBuffer(io::MutableBuffer & buf) { m_inputBuffers.push_back(buf); }
+        void  pushOutputBuffer(io::ConstBuffer & buf)  { 
+            if ( buf.data() == nullptr ) {
+                SYM_TRACE("PUSH EMPTY BUFFER");
+            }
+            m_outputBuffers.push_back(buf); 
+        }
 
         io::MutableBuffer * peekInputBuffer() { return m_inputBuffers.empty()?nullptr:&m_inputBuffers.front(); }
         io::ConstBuffer * peekOutputBuffer()  { return m_outputBuffers.empty()?nullptr:&m_outputBuffers.front(); }
         
-        void popInputBuffer() { if ( !m_inputBuffers.empty()) m_inputBuffers.pop(); }
-        void popOutputBuffer() { if ( !m_outputBuffers.empty()) m_outputBuffers.pop(); }
+        void popInputBuffer() { if ( !m_inputBuffers.empty()) m_inputBuffers.pop_front(); }
+        void popOutputBuffer() { if ( !m_outputBuffers.empty()) m_outputBuffers.pop_front(); }
         
     private:
         /// 等待特定的事件，events取值selectRead/selectWrite组合，timeout单位毫秒（-1不超时）
@@ -827,6 +832,7 @@ namespace nio
                 (recvSize), buf->limit(), buf->size());
             if ( buf->size() == buf->limit() ) {
                 entry.recvCb(channel->fd(), statusOk, *buf);
+                channel->popInputBuffer();
                 break;  // 回调执行后不再继续读，因为如果收到的数据异常，再回调中channel已经被执行close操作。
             }
         } // end while
@@ -859,6 +865,7 @@ namespace nio
         } else {
             // 发送失败, 执行失败回调。只回调输出当前buffer，其余buffer在shutdownWrite时逐个返回
             entry.sendCb(channel->fd(), statusError, *buf);
+            channel->popOutputBuffer();
         }
             
         // 如果没有缓存，则取消selectWrite事件, 无论这次发送正常或者失败。
