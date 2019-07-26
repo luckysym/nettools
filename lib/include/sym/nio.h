@@ -832,7 +832,7 @@ namespace nio
                 (recvSize), buf->limit(), buf->size());
             if ( buf->size() == buf->limit() ) {
                 entry.recvCb(channel->fd(), statusOk, *buf);
-                channel->popInputBuffer();
+                if (buf->data() == nullptr ) channel->popInputBuffer();  // 接收缓存被清空，则删除队列缓存，不再监听接收任务
                 break;  // 回调执行后不再继续读，因为如果收到的数据异常，再回调中channel已经被执行close操作。
             }
         } // end while
@@ -843,6 +843,9 @@ namespace nio
             entry.recvCb(channel->fd(), statusError, *channel->peekInputBuffer());
             channel->popInputBuffer();
             m_selector.cancel(channel->fd(), selectRead);
+        } else {
+            // 接收成功，所有接收任务都完成，没有继续接收的需求，就取消读事件监听
+            if ( channel->peekInputBuffer() == nullptr ) m_selector.cancel(channel->fd(), selectRead);
         }
     }
 
